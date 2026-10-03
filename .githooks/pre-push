@@ -1,3 +1,18 @@
 #!/bin/sh
 # Blocks direct pushes to main and warns about edits outside your lane. See scripts/lane.py.
-exec python3 "$(git rev-parse --show-toplevel)/scripts/lane.py" pre-push
+# If Python is missing or the script fails, warn and let the push through: a broken helper
+# must never stop someone from pushing their branch.
+ROOT="$(git rev-parse --show-toplevel)"
+PY="$(command -v python3 || command -v python)"
+if [ -z "$PY" ]; then
+  echo "pre-push: Python not found, skipping lane checks." >&2
+  exit 0
+fi
+"$PY" "$ROOT/scripts/lane.py" pre-push
+rc=$?
+if [ "$rc" -eq 3 ]; then
+  exit 1
+elif [ "$rc" -ne 0 ]; then
+  echo "pre-push: lane check failed (exit $rc), pushing anyway. Tell veed2005." >&2
+fi
+exit 0

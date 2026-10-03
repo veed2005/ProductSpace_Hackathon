@@ -18,7 +18,7 @@ The source of truth for file ownership is `scripts/lane.py` (CODEOWNERS mirrors 
 ### How lanes are enforced
 
 - **Claude Code knows your lane.** When anyone opens Claude Code in this repo, a session hook (`.claude/settings.json` → `scripts/lane.py session-start`) works out who you are from your GitHub login (`gh`) or git config, and tells Claude your lane, your plan file, and which files it may edit. If it can't tell, Claude asks you. Pin it yourself with `python3 scripts/lane.py set <A|B|C|D>`.
-- **Git hook.** `.githooks/pre-push` blocks direct pushes to `main` and warns when your branch edits another lane's files or shared files. The Claude session hook turns it on automatically. Without Claude, run once: `git config core.hooksPath .githooks`.
+- **Git hook.** `.githooks/pre-push` blocks direct pushes to `main` and warns when your branch edits another lane's files or shared files. `sh scripts/setup.sh` turns it on (so does the Claude session hook). If the hook's script ever breaks, it warns and lets the push through rather than blocking you.
 - **CODEOWNERS.** A PR that touches another lane's files automatically requests that owner's review.
 - **Self-check any time:** `python3 scripts/lane.py check`.
 

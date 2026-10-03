@@ -10,13 +10,16 @@ A live web dashboard shows forms filling in, documents being explained, and memo
 
 ## Quick start
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires [uv](https://docs.astral.sh/uv/) (it installs the right Python for you).
 
 ```bash
-uv sync
-cp .env.example .env        # then fill in keys
-uv run uvicorn app.main:app --reload
+git clone https://github.com/veed2005/ProductSpace_Hackathon.git
+cd ProductSpace_Hackathon
+sh scripts/setup.sh                       # installs deps, enables git hooks, creates .env, runs tests, shows your lane
+uv run uvicorn app.main:app --reload      # always run commands from the repo folder
 ```
+
+Then open Claude Code in this folder and say **"Start Phase A1"** (or B1, C1, D1 for your lane).
 
 Chat with Formline in the terminal (no Twilio needed):
 
