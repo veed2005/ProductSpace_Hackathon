@@ -85,3 +85,10 @@ Format: decision, alternatives considered, why.
 
 **Transcript hides a 4-digit reply only when Formline's previous message asked for a PIN or SSN digits.**
 - Why: the first version hid every bare 4-digit reply, which also hid income answers like "1450" during testing.
+
+**The demo uses a live new user (Rosa) whose memory is built on stage, with the seeded Maria only as a fallback.**
+- Alternatives: demo memory reuse with a pre-seeded returning user.
+- Why: judges see the profile being built in step 1 and reused in step 4, so the "x% faster" number is measured live, not staged. Maria stays seeded in case memory reuse fails.
+
+**A pre-flight script checks the demo setup instead of a printed checklist alone.**
+- Why: the failures that sink live demos are configuration (stale ngrok URL, Twilio webhook pointing at yesterday's tunnel, dev endpoint left on, key missing). Each is a few lines to check automatically, and the script prints the fix.

@@ -56,8 +56,9 @@ LANES = {
         "plan": "docs/lanes/LANE_D.md",
         "paths": [
             "app/memory/*", "app/engines/status_engine.py", "app/dashboard/*", "app/metrics.py",
-            "scripts/seed_demo.py", "scripts/reset_demo.py", "docs/PRIVACY.md", "docs/DEMO_SCRIPT.md",
-            "tests/test_memory_*", "tests/test_dashboard_*", "tests/test_metrics_*",
+            "scripts/seed_demo.py", "scripts/reset_demo.py", "scripts/make_demo_letter.py",
+            "scripts/demo_preflight.py", "docs/PRIVACY.md", "docs/DEMO_SCRIPT.md",
+            "tests/test_memory_*", "tests/test_dashboard_*", "tests/test_metrics_*", "tests/test_demo_*",
         ],
     },
 }
