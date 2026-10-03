@@ -1,6 +1,7 @@
 """Re-read a filled PDF and check it against what we meant to write. Owner: Lane C."""
 
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 
 import pymupdf as fitz
@@ -116,6 +117,19 @@ def _fits(text: str, w: WidgetInfo, multiline: bool) -> bool:
     size = w.font_size or MIN_AUTO_FONT_SIZE
     lines = _wrap_count(text, font, size, width)
     return lines * size * LINE_HEIGHT <= height
+
+
+def shrink_to_fit(text: str, w: WidgetInfo, multiline: bool = False) -> float | None:
+    """The largest font size, below the field's own, at which the text fits its box and is
+    still readable (>= MIN_AUTO_FONT_SIZE). None if it already fits or can't fit at all."""
+    if not text or w.font_size == 0 or _fits(text, w, multiline):
+        return None
+    size = w.font_size
+    while size > MIN_AUTO_FONT_SIZE:
+        size = round(max(size - 0.5, MIN_AUTO_FONT_SIZE), 1)
+        if _fits(text, replace(w, font_size=size), multiline):
+            return size
+    return None
 
 
 def _wrap_count(text: str, font: str, size: float, width: float) -> int:

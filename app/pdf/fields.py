@@ -44,6 +44,7 @@ class WidgetInfo:
     font: str
     font_size: float  # 0 means auto-size
     border_width: float
+    xref: int = 0  # PDF object number of the widget
 
 
 @dataclass
@@ -120,6 +121,7 @@ def list_fields_in(doc: fitz.Document) -> list[PdfField]:
                 font=w.text_font or "Helv",
                 font_size=w.text_fontsize or 0.0,
                 border_width=w.border_width or 0.0,
+                xref=w.xref,
             ))
     return list(fields.values())
 

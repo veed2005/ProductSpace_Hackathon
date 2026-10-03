@@ -12,6 +12,17 @@ from app.pdf.verify import read_fields, verify_pdf
 
 DEMO_FORMS = ["il_snap", "il_medicaid", "il_school_meals"]
 
+
+@pytest.fixture(autouse=True)
+def no_model(monkeypatch):
+    """Alias matching is under test here; the model fallback is unavailable unless a test sets one."""
+    from app.llm import client as llm
+
+    def unavailable(*a, **k):
+        raise RuntimeError("no model in tests")
+
+    monkeypatch.setattr(llm, "structured", unavailable)
+
 # Fake persona answers for the SNAP schema, keyed by field id (what Lane A collects).
 ROSA = {
     "applicant_name": "Rosa Martinez", "date_of_birth": "03/14/1988",
@@ -102,9 +113,95 @@ def test_match_form_whole_words(text, form_id):
     assert form_library.match_form(text) == form_id
 
 
-def test_match_form_ignores_forms_without_a_schema():
-    # School meals has a PDF and meta but its schema comes in C4, so it isn't offered yet.
-    assert form_library.match_form("free lunch for my kids") is None
+@pytest.mark.parametrize("text, form_id", [
+    ("free lunch for my kids", "il_school_meals"),
+    ("I need to renew my Medicaid", "il_medicaid"),
+    ("almuerzo gratis para mis hijos", "il_school_meals"),
+])
+def test_match_form_finds_every_demo_form(text, form_id):
+    assert form_library.match_form(text) == form_id
+
+
+def test_match_form_ignores_forms_without_a_schema(monkeypatch, tmp_path):
+    from app import config
+
+    (tmp_path / "draft").mkdir()
+    (tmp_path / "draft" / "meta.json").write_text('{"form_id": "draft", "name": "Draft", "aliases": ["draft form"]}')
+    monkeypatch.setenv("FORMS_DIR", str(tmp_path))
+    config.get_settings.cache_clear()
+    assert form_library.match_form("the draft form") is None
+
+
+# Plausible answers by type, for filling every field of a schema.
+SAMPLE = {"text": "Lopez", "number": "3", "money": "650", "date": "03/14/1988", "phone": "(217) 555-0104",
+          "yes_no": "yes", "address": "412 Elm St Apt 2B, Springfield, IL 62701", "ssn_last4": "4821"}
+
+
+@pytest.mark.parametrize("form_id", DEMO_FORMS)
+def test_every_demo_schema_is_reviewed_and_clean(form_id):
+    from app.dashboard.forms_api import schema_problems
+    from app.engines.ingest import schema_problems as ingest_problems
+
+    schema = form_library.load_schema(form_id)
+    assert schema.reviewed
+    assert schema_problems(form_id) == []
+    assert ingest_problems(schema, {f.name: f for f in list_fields(form_library.pdf_path(form_id))}) == []
+    assert sum(1 for f in schema.fields if f.profile_key) >= 10, "memory reuse is the point of the demo"
+
+
+@pytest.mark.parametrize("form_id", DEMO_FORMS)
+def test_every_field_of_every_demo_form_fills_and_verifies(form_id, tmp_path: Path):
+    schema = form_library.load_schema(form_id)
+    values = {}
+    for f in schema.fields:
+        if f.pdf_field:
+            answer = f.options[0] if f.type == "choice" else SAMPLE[f.type]
+            values[f.pdf_field] = f.pdf_values.get(answer, answer)
+    out = fill_pdf(form_library.pdf_path(form_id), values, tmp_path / "out.pdf")
+    result = verify_pdf(out, values, schema)
+    assert result.ok, result
+
+
+def test_demo_forms_share_memory_keys():
+    """Household, income and address overlap across the three forms, so the second one is faster."""
+    keys = {fid: {f.profile_key for f in form_library.load_schema(fid).fields if f.profile_key}
+            for fid in DEMO_FORMS}
+    shared = keys["il_snap"] & keys["il_medicaid"] & keys["il_school_meals"]
+    assert {"full_name", "address", "phone", "employment.gross_pay"} <= shared
+
+
+def _fake_match(monkeypatch, form_id):
+    from app.llm import client as llm
+
+    calls = []
+
+    def fake(output, **kwargs):
+        calls.append(kwargs)
+        return output(form_id=form_id)
+
+    monkeypatch.setattr(llm, "structured", fake)
+    return calls
+
+
+def test_model_fallback_for_fuzzy_requests(monkeypatch):
+    from app.llm import client as llm
+
+    calls = _fake_match(monkeypatch, "il_snap")
+    assert form_library.match_form("I need help paying for groceries") == "il_snap"
+    assert calls[0]["model"] == llm.fast_model()
+    assert "il_snap: Illinois SNAP Application" in calls[0]["system"]
+
+
+def test_model_fallback_cannot_invent_a_form(monkeypatch):
+    _fake_match(monkeypatch, "il_housing_voucher")
+    assert form_library.match_form("help with my housing voucher") is None
+
+
+def test_alias_match_skips_the_model(monkeypatch):
+    calls = _fake_match(monkeypatch, "il_medicaid")
+    assert form_library.match_form("food stamps please") == "il_snap"
+    assert form_library.match_form("I need help paying for groceries", use_llm=False) is None
+    assert calls == []
 
 
 def test_match_form_folds_accents_and_case(monkeypatch):

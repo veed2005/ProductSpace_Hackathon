@@ -136,3 +136,21 @@ Format: decision, alternatives considered, why.
 
 **`explain_document` raises on API failure instead of returning a low-confidence result.**
 - Why: a low-confidence result makes the brain say "the photo is blurry, please retake it", which is wrong when the real problem is the network. Lane A catches the error and apologizes instead.
+**Ingestion: the model picks and words the questions; code supplies and checks everything it can read from the PDF.**
+- Alternatives: one question per PDF field; let the model's draft stand.
+- Why: a 580-field form can't become 580 phone questions, so choosing 12-40 is the model's job. But field names, Yes/No states, max lengths and SSN handling are facts in the PDF, so code fills them in (Yes/No from the printed "Yes"/"No" labels, then the model's guess, then layout) and checks the draft (fields exist, no box used twice, conditions point backwards, memory keys are canonical). It retries once with the problems listed, then repairs what's left (drops invented boxes, renames duplicate ids, clears bad keys) so a stage upload never fails on a bad draft. Output is always `reviewed: false`.
+
+**The model sees each field's tooltip or printed label, not just its name.**
+- Why: government PDFs name fields `TextField1[3]` or (really) `breastcancer[2]` for "wages/self-employment". Tooltips are usually descriptive; when they're the authoring tool's default, we use the words printed to the left of (or above) the box. Page text is trimmed to the start of each page to keep a 23-page form fast.
+
+**Medicaid and school meals schemas were hand-written, not generated.**
+- Why: no API key was available on the Lane C machine, and these two are demo-critical. They were built against the PDFs with the same checks ingestion uses, fill-and-verify tested, and are marked reviewed. Ingestion itself is covered by mocked tests and one live test.
+
+**`fill_pdf` shrinks text to fit a tight box (down to 6pt) before reporting truncation.**
+- Why: the Medicaid date-of-birth boxes are 47pt wide, so "03/14/1988" lost its last digit at the form's 10pt. Real forms are full of boxes like that. Shrinking keeps the full value readable; anything that won't fit at 6pt is still reported by `verify_pdf`.
+
+**`match_form` falls back to the fast model only when no alias matches.**
+- Why: aliases cover what people usually say and cost nothing; "help paying for groceries" needs language understanding. The model may only return a real form_id, and any error means "no match", so the brain asks instead of crashing.
+
+**Form library files are read and written as UTF-8.**
+- Why: Python on Windows defaults to cp1252, which garbled the Spanish aliases ("seguro médico").
