@@ -20,22 +20,46 @@ uv run uvicorn app.main:app               # http://localhost:8000
 ```
 
 1. **Load the extension:** Chrome → `chrome://extensions` → turn on Developer mode → **Load unpacked** → choose the repo's `extension/` folder. Pin the Formline icon.
-2. **Pair it:** click the icon, enter the phone number you'll call from, choose **Text me** (or **Call me** for a landline), type the 6-digit code, then your first name and a 4-digit PIN. Without Twilio set up, the code is printed in the server console (and shown in the popup if `FORMLINE_DEV_ENDPOINTS=true`). The popup shows **CONNECTED** and the badge turns green.
+2. **Pair it:** click the icon, enter the phone number you'll call from, choose **Text me** (or **Call me** for a landline), type the 6-digit code, then your first name and a 4-digit PIN. Without Twilio set up, the code is printed in the server console (and shown in the popup if `FORMLINE_DEV_ENDPOINTS=true`). The popup shows **CONNECTED** and the badge turns green. If Chrome is on a different computer from the server, first open **Server** under the Send code button and enter the server's ngrok URL; pairing and the live connection both work through ngrok.
 3. **Open the demo portal:** http://localhost:8000/demo/riverbend/
 4. **Watch:** http://localhost:8000/dashboard (the **Agent** tab).
 5. **Call without a phone:** restart the server with `TWILIO_VALIDATE_SIGNATURES=false`, then
    ```bash
    uv run python scripts/call_sim.py --phone +1YOURNUMBER
    ```
-   Type `/key 4821` for the PIN, then "I need to make an appointment with Dr. Smith." Never run with signatures off while ngrok is exposing the server.
+   Type `/key` and the PIN you chose when pairing (the demo below pairs as Margaret with PIN 4821, so `/key 4821`), then "I need to make an appointment with Dr. Smith." Never run with signatures off while ngrok is exposing the server.
 
 ## The real phone
 
 1. Put `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` in `.env`.
-2. `ngrok http 8000`, put the https URL in `PUBLIC_BASE_URL`, restart the server.
-3. `uv run python -m app.channels.twilio_setup` points the number's voice and SMS webhooks at it.
-4. Pair the extension with the phone you'll call from (the code now arrives by text, or by voice call for landlines).
+2. Start ngrok. Install it with `winget install ngrok.ngrok` (Windows) or `brew install ngrok` (Mac), and run `ngrok config add-authtoken <token>` once per computer (the token is on dashboard.ngrok.com).
+   - **With a reserved domain** (the team has one; it's the host in `PUBLIC_BASE_URL`): `ngrok http --url=https://your-name.ngrok-free.dev 8000`. The URL never changes, so step 3 is one-time. The authtoken must belong to the ngrok account that owns the domain, and only one computer can run that tunnel at a time.
+   - **Without one:** `ngrok http 8000` gives a new URL on every start. Put it in `PUBLIC_BASE_URL`, restart the server, and redo step 3 each time.
+
+   Free ngrok domains show a warning page the first time a browser opens a page through them (click **Visit Site**). Twilio, pairing and the extension's connection aren't affected.
+3. `uv run python -m app.channels.twilio_setup` points the number's voice and SMS webhooks at `PUBLIC_BASE_URL`.
+4. Pair the extension with the phone you'll call from (the code arrives by text, or by voice call for landlines; both need the account settings below).
 5. Call the number. `uv run python scripts/demo_preflight.py` checks all of this before a demo.
+
+### Twilio account settings
+
+Incoming calls work as soon as the webhooks are set. Anything Formline *sends* needs a switch in the Twilio console that `.env` can't change. The error code appears in the server log, and the pairing popup explains it.
+
+- **Outgoing calls** ("Call me" pairing codes; error 21215): Console → Voice → Settings → Geo permissions → allow the United States (and any other country you'll call). It takes effect within a few minutes.
+- **Outgoing texts** (pairing codes by text, and every SMS reply; error 30034, "unregistered number"): US numbers must be registered for A2P 10DLC (Console → Messaging → Regulatory Compliance), which takes days; a verified toll-free number is the alternative. Until then Twilio accepts each text but never delivers it, so choose **Call me** when pairing, and don't rely on texting as the stage fallback.
+- **Pairing on your own machine while neither works:** comment out `TWILIO_ACCOUNT_SID` in `.env`, restart the server, and pair (the code is printed in the server console). Then put it back and restart. The pairing is kept.
+
+## Moving to another computer
+
+Git carries the code and the docs. These stay behind:
+
+1. **Tools:** [uv](https://docs.astral.sh/uv/) (Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`), Git (on Windows, Git Bash runs `sh scripts/setup.sh`), Chrome, ngrok, and the GitHub CLI. Run `gh auth login`: it opens PRs and tells Claude Code which lane you own. If Claude Code still says the lane is unknown, run `python scripts/lane.py set <A|B|C|D>`.
+2. **Set up the clone:** `sh scripts/setup.sh`, plus `uv run playwright install chromium` if you'll run the browser tests.
+3. **`.env` is not in git.** Copy it over privately (never by chat or email), or fill in a fresh copy of `.env.example`.
+4. **ngrok's authtoken** lives in ngrok's own config: `ngrok config add-authtoken <token>`, from the account that owns the reserved domain. Stop ngrok on the old computer first. With the same domain, the Twilio webhooks don't change.
+5. **`data/` is not in git.** It holds the database: profiles, hashed PINs, paired browsers and transcripts. Pair the extension again on the new computer, or copy `data/` across (with both servers stopped) to keep everything.
+6. **The extension:** load `extension/` unpacked again in that computer's Chrome. If Chrome isn't on the computer running the server, set the popup's **Server** to the ngrok URL.
+7. Run `uv run python scripts/demo_preflight.py`.
 
 ## The golden demo (about 90 seconds)
 
@@ -62,7 +86,7 @@ Also try: "**Stop**" mid-task (halts immediately), "**No**" at the confirmation 
 
 Reset between rehearsals: the portal's footer has **Reset demo data**; the dashboard's **Demo → Reset** wipes Formline's side.
 
-**If something fails on stage:** text the number instead (texting drives the browser the same way); or run `scripts/call_sim.py` on screen next to the dashboard.
+**If something fails on stage:** text the number instead (texting drives the browser the same way, but only once texts are delivered; see [Twilio account settings](#twilio-account-settings)); or run `scripts/call_sim.py` on screen next to the dashboard.
 
 ## How it works
 
@@ -146,4 +170,4 @@ Latest live results (2026-10-03, `gpt-5.4-mini`, simulated caller): golden demo 
 - Iframes (including cross-origin) aren't read.
 - PDFs over 10 MB, or past about 250,000 characters of text, are cut off; the agent says so.
 - Twilio ConversationRelay plays queued status lines in order; a long status can delay a question by a second or two.
-- The real phone path is the same code as the simulator, but it still needs one live run with the team's Twilio number and ngrok.
+- Real incoming calls on the team's Twilio number work. Outgoing calls and texts wait on the [Twilio account settings](#twilio-account-settings).
