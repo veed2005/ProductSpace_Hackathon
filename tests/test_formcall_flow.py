@@ -116,6 +116,8 @@ def spanish_demo(c: Caller, model: FakeModel) -> list[str]:
     model.explanations["renta"] = dict(
         quote="We ask for your rent because housing costs can increase your monthly benefit",
         plain="Su renta puede aumentar su beneficio mensual.", uncertain=False, consequential=False)
+    model.translations["We ask for your rent because housing costs can increase your monthly benefit"] = (
+        "Le pedimos su renta porque el costo de la vivienda puede aumentar su beneficio mensual.")
     model.interps["En realidad son trescientos quince por semana, no trescientos."] = dict(
         intent="correction", target_field="monthly_income", amount=315, period="week", value="315",
         confidence=0.9, language="es")
@@ -142,7 +144,9 @@ def test_english_form_completed_entirely_in_spanish_with_the_live_demo_script(mo
     assert "apellido" in replies[4]  # unsure of the surname: asked to spell it
     assert "D, O, U, B, E, K" in replies[5] and "Evan Doubek" in replies[5]
     assert "$1,299 al mes" in replies[19]  # weekly pay converted and explained before it's entered
-    assert 'El formulario dice, en inglés: "We ask for your rent' in replies[21]
+    # The form's English words are read back translated, never as English to a Spanish speaker.
+    assert 'El formulario dice, traducido del inglés: "Le pedimos su renta porque' in replies[21]
+    assert "We ask for your rent" not in replies[21]
     assert "Necesito un sí o un no claro" in replies[33]  # "ajá" is not consent
     assert "No se ha enviado" in replies[34]
     assert "E, V, A, N, punto, D, O, U, B, E, K" in replies[36]
@@ -358,6 +362,20 @@ def test_important_notices_are_presented_with_verified_quotes(model):
         rows = {r.category: r for r in s.exec(select(FormNotice)).all()}
     assert rows["data_sharing"].status == "disagreed" and rows["data_sharing"].page == 2
     assert rows["deadline"].status == "pending"  # low severity: listed, not read out
+
+
+def test_document_quotes_are_translated_for_the_caller(model):
+    quote = "may also be shared with Riverbend Partner Network members"
+    model.translations[quote] = "también puede compartirse con los miembros de Riverbend Partner Network"
+    spoken = lang_mod.quote("es", "notice_read", quote)
+    assert spoken == ('El texto, traducido del inglés, dice: "también puede compartirse con los miembros de '
+                      'Riverbend Partner Network".')
+    assert lang_mod.quote("en", "notice_read", quote) == f'Here is the exact wording: "{quote}".'
+
+
+def test_document_quote_says_it_is_english_when_it_cant_be_translated(model):
+    spoken = lang_mod.quote("es", "doc_says", "We ask for your rent")  # the model returned it unchanged
+    assert spoken == 'El formulario dice, en inglés: "We ask for your rent".'
 
 
 def test_fake_notice_quotes_are_dropped():

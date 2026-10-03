@@ -8,6 +8,7 @@ interpretation.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import Optional
 
@@ -63,7 +64,9 @@ def explain(*, form_id: str, schema: FormSchema, field: Optional[FormField], que
     lines: list[str] = []
     page = doctext.find_quote(result.quote, doctext.pages(form_id)) if result.quote else None
     if page:
-        lines.append(lang_mod.say(language, "doc_says", quote=result.quote.strip().strip('"').rstrip(". ")))
+        quote = result.quote.strip().strip('"').rstrip(". ")
+        lines.append(lang_mod.quote(language, "doc_says", quote, form_id=form_id,  # translated once, then cached
+                                    cache_key=f"dq.{hashlib.sha1(quote.encode()).hexdigest()[:10]}"))
         lines.append(lang_mod.say(language, "plain", text=result.plain))
     else:
         lines.append(lang_mod.say(language, "no_quote", text=result.plain) if (result.quote or result.uncertain)
