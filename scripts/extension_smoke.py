@@ -112,6 +112,39 @@ def main() -> int:
             shot = server.command("screenshot")
             assert shot["ok"] and shot["jpeg_base64_chars"] > 1000, shot
             print(f"screenshot (opt-in vision fallback): {shot['jpeg_base64_chars']} base64 chars")
+
+            # Tabs: a link that opens a new tab is followed; the window's tabs are listed; switching goes back.
+            page.goto(server.url + "/demo/library/index.html")
+            page.bring_to_front()
+            time.sleep(0.8)
+            s = server.command("get_page_state")
+            home_tab = s["tab_id"]
+            r = server.command("click", element_id=find(s, "link", "Branch hours")["id"], doc_id=s["doc_id"])
+            assert r["success"] and r["new_tab_id"] and r["new_tab_id"] != home_tab, r
+            hours_tab = r["new_tab_id"]
+            s = server.command("get_page_state", tab_id=hours_tab)
+            assert "Branch hours" in s["title"], s["title"]
+            tabs = {t["tab_id"]: t for t in server.command("list_tabs", tab_id=hours_tab)["tabs"]}
+            assert tabs[hours_tab]["active"] and tabs[home_tab]["switchable"] and not tabs[home_tab]["active"], tabs
+            print(f"tabs: link opened a new tab; window lists {len(tabs)} tabs:",
+                  [t["title"] or "(untitled)" for t in tabs.values()])
+            r = server.command("switch_tab", tab_id=hours_tab, value=str(home_tab))
+            assert r["success"] and r["new_tab_id"] == home_tab and r["page_changed"], r
+            time.sleep(0.6)
+            s = server.command("get_page_state")  # no tab named: whichever tab is in front
+            assert s["tab_id"] == home_tab and "Catalog" in s["title"], s["title"]
+            tabs = {t["tab_id"]: t for t in server.command("list_tabs", tab_id=home_tab)["tabs"]}
+            assert tabs[home_tab]["active"] and hours_tab in tabs, tabs  # switching back closed nothing
+            r = server.command("switch_tab", tab_id=home_tab, value=str(hours_tab))  # a tab the click opened, by id
+            assert r["success"], r
+            gone = server.command("switch_tab", tab_id=hours_tab, value="99999999")
+            assert not gone["success"] and gone["error"] == "no_tab", gone
+            blocked = [t for t in tabs.values() if not t["switchable"]]
+            if blocked:
+                r = server.command("switch_tab", tab_id=hours_tab, value=str(blocked[0]["tab_id"]))
+                assert not r["success"] and r["error"] == "unsupported_page", r
+                assert blocked[0]["url"] == "", blocked[0]
+            print("tabs: switched back to the first tab and forward again; closed and unusable tabs refused")
             print("\nEXTENSION SMOKE TEST PASSED")
             return 0
         except Exception:

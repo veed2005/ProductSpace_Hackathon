@@ -199,7 +199,48 @@ async function sendToTab(tabId, payload, { inject = true } = {}) {
   }
 }
 
+// Every tab in the window the agent is working in, in tab-strip order. Titles only: a tab's page is read
+// only after the agent switches to it. Pages Formline can't work on are listed without an address.
+async function listTabs(tabId) {
+  let windowId;
+  try {
+    windowId = (await resolveTab(tabId)).windowId;
+  } catch (e) {
+    windowId = (await chrome.windows.getLastFocused()).id;
+  }
+  const tabs = await chrome.tabs.query({ windowId });
+  return {
+    tabs: tabs.map((t) => ({ tab_id: t.id, title: t.title || "", url: eligible(t) ? t.url : "", index: t.index,
+      active: t.active, switchable: eligible(t) })),
+  };
+}
+
+// Bring another tab of the same window to the front. Never closes or opens tabs.
+async function switchTab(tabId, targetId) {
+  let current = null;
+  try {
+    current = await resolveTab(tabId);
+  } catch (e) { /* the tab we were on is gone; switching away is still fine */ }
+  let target;
+  try {
+    target = await chrome.tabs.get(targetId);
+  } catch (e) {
+    throw err("no_tab", "That tab was closed.");
+  }
+  if (current && target.windowId !== current.windowId) {
+    throw err("blocked", "Formline only switches between tabs in the same window.");
+  }
+  if (!eligible(target)) throw err("unsupported_page", "Formline only works on regular web pages.");
+  await chrome.tabs.update(target.id, { active: true });
+  let after = await chrome.tabs.get(target.id);
+  if (after.status === "loading") after = await waitForLoad(target.id);  // a sleeping tab reloads when shown
+  return { success: true, action: "switch_tab", url_before: current ? current.url : null, url_after: after.url,
+    page_changed: true, new_tab_id: after.id };
+}
+
 async function run(action, args, tabId) {
+  if (action === "list_tabs") return listTabs(tabId);
+  if (action === "switch_tab") return switchTab(tabId, args.target_tab_id);
   let tab = await resolveTab(tabId);
   if (!eligible(tab)) throw err("unsupported_page", "Formline only works on regular web pages.");
   const urlBefore = tab.url;

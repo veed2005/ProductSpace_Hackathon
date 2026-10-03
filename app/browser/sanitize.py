@@ -7,7 +7,7 @@ every label, value, and text block.
 
 import re
 
-from app.browser.protocol import PageElement, PageState
+from app.browser.protocol import PageElement, PageState, TabInfo
 
 MAX_ELEMENTS = 300
 MAX_TEXT = 300
@@ -60,6 +60,11 @@ def sanitize_page(state: PageState) -> PageState:
         "url": _strip_query(state.url),
         "truncated": state.truncated or len(state.elements) > MAX_ELEMENTS,
     })
+
+
+def sanitize_tab(tab: TabInfo) -> TabInfo:
+    """A tab in the window's tab list: its title is scrubbed like page text, its address loses the query."""
+    return tab.model_copy(update={"title": mask(_clip(tab.title, 80) or ""), "url": _strip_query(tab.url)})
 
 
 def _strip_query(url: str) -> str:

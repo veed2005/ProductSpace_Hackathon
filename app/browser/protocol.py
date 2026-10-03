@@ -13,7 +13,7 @@ Websocket messages (JSON, all with a "type"):
     pong          {}
   backend -> extension
     welcome       {profile_name}
-    command       {id, action, args, tab_id}                         action is "get_page_state" or one of ACTIONS
+    command       {id, action, args, tab_id}                         action is "get_page_state", "list_tabs" or one of ACTIONS
     ping          {}
 """
 
@@ -22,7 +22,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 ActionName = Literal["search", "click", "type", "clear", "select", "check", "uncheck", "press_enter", "scroll",
-                     "go_back", "navigate", "focus"]
+                     "go_back", "navigate", "focus", "switch_tab"]
 ACTIONS: tuple[str, ...] = ActionName.__args__  # type: ignore[attr-defined]
 
 # Roles a control can have in a snapshot. "text", "heading", "alert" and "dialog" carry content only.
@@ -84,6 +84,19 @@ class PageState(BaseModel):
         if not element_id:
             return None
         return next((e for e in self.elements if e.id == element_id), None)
+
+
+class TabInfo(BaseModel):
+    """One tab in the window the agent is working in. Other tabs are known by title only; their pages are
+    read only after the agent switches to them."""
+    tab_id: int
+    title: str = ""
+    url: str = ""  # empty for pages Formline can't work on (chrome://, the web store...)
+    index: int = 0  # position in the tab strip
+    active: bool = False
+    switchable: bool = True
+    handle: str = ""  # "T1", "T2"...: what the model calls it; set by the server (app/agent/runner.py)
+    current: bool = False  # the tab the agent is on
 
 
 class ActionResult(BaseModel):
