@@ -188,3 +188,17 @@ Format: decision, alternatives considered, why.
 **The finale form is the 3-page IDHS SNAP Redetermination (IL444-1893), kept in `forms/_new_form_demo/` without a meta.json.**
 - Alternatives: a county LIHEAP application (12 pages, a scanned page with boxes laid over it).
 - Why: it's clean, short (about a 3k-token prompt), Illinois, and overlaps the SNAP application, so the newly added form fills mostly from memory on stage. Without meta.json the library ignores it until it's uploaded.
+
+**Voice: the relay websocket is authorized with a one-time token issued by the signed `/twilio/voice` webhook.**
+- Alternatives: validate `X-Twilio-Signature` on the websocket upgrade; leave the websocket open.
+- Why: the call webhook is already signature-checked, and a random single-use token (2-minute expiry) in the relay URL ties each websocket to a real call without depending on undocumented upgrade-signing details.
+
+**Voice: the brain gets an empty-text turn when a call connects; Twilio speaks a short fixed greeting first.**
+- Alternatives: only a static `welcomeGreeting`; wait for the caller to speak.
+- Why: the greeting plays instantly while the brain thinks, and the brain still owns the real opening ("welcome back, we were on question 6"). Callers with a Spanish profile get the Spanish greeting and Spanish speech recognition from the first second.
+
+**Voice: to hang up after the goodbye, wait about as long as the reply takes to say, then send `end`.**
+- Why: ConversationRelay's `end` cuts speech off immediately. ~150 words a minute, capped at 15 s.
+
+**Voice: keypad digits are buffered and sent as one turn on `#`, at 4 digits, or after a 2-second pause.**
+- Why: a PIN typed on the keypad arrives as four separate `dtmf` messages; the brain should see "1234", and a single "1" for a menu choice still goes through after the pause.
