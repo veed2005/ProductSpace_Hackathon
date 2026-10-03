@@ -28,6 +28,7 @@ markers = [
     "live: hits the real Anthropic API (run with: pytest -m live)",
 ]
 addopts = "-m 'not live'"
+filterwarnings = ["ignore::DeprecationWarning:importlib._bootstrap"]
 
 [tool.uv]
 package = false

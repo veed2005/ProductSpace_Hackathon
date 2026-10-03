@@ -26,3 +26,15 @@ Format: decision, alternatives considered, why.
 
 **Python pinned to 3.11–3.13.**
 - Why: 3.14 is the machine default, but some compiled dependencies (PyMuPDF, uvloop) lag new Python releases. 3.11 is installed and known good.
+
+## Team setup
+
+**Four lanes with frozen contracts and working stubs, instead of splitting by phase.**
+- Alternatives: everyone works through the phases in order; split by feature without interfaces.
+- Why: four people over ~30 hours. Phases depend on each other (the dashboard needs forms, forms need the brain), so splitting by phase leaves people blocked. Lanes own disjoint files, so merges rarely conflict. Every cross-lane call already has a stub that returns realistic data, so each lane can build and test on its own from hour one.
+
+**A hand-written placeholder form (`forms/sample_benefits`) with a generated fillable PDF.**
+- Why: lets Lanes A and C work on the full fill → verify → receipt path before the real PDFs are chosen and ingested.
+
+**Server-side refusal fallback on for Opus/Sonnet 5.5 calls in `llm/client.py`.**
+- Why: if the strong model declines a document (for example a medical bill or court notice it misreads as sensitive), the API retries on another model in the same call instead of failing the person's request.

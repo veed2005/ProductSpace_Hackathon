@@ -1,0 +1,7 @@
+{
+  "form_id": "sample_benefits",
+  "name": "Sample Benefits Application",
+  "aliases": ["sample form", "test form", "benefits application"],
+  "agency": "Placeholder Agency",
+  "description": "Hand-written placeholder form for development until the real PDFs are added."
+}

@@ -6,6 +6,8 @@ A live web dashboard shows forms filling in, documents being explained, and memo
 
 > Prototype for a hackathon. Uses fake personas only. Nothing is submitted to any government system; completed forms end as verified, downloadable PDFs.
 
+**Team:** read [docs/TEAM.md](docs/TEAM.md) first (lanes, file ownership, git workflow). The full spec is in [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md).
+
 ## Quick start
 
 Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
@@ -14,6 +16,12 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 uv sync
 cp .env.example .env        # then fill in keys
 uv run uvicorn app.main:app --reload
+```
+
+Chat with Formline in the terminal (no Twilio needed):
+
+```bash
+uv run python scripts/simulate.py --phone +15550001111 --channel sms
 ```
 
 - Health check: http://localhost:8000/health
@@ -63,6 +71,7 @@ docs/          TRADEOFFS.md, PRIVACY.md, DEMO_SCRIPT.md
 ## Build status
 
 - [x] Phase 0: setup, models, FastAPI skeleton
+- [x] Team scaffolding: lane contracts and working stubs, sample form, simulator, CI
 - [ ] Phase 1: brain + CLI simulator
 - [ ] Phase 2: SMS/MMS
 - [ ] Phase 3: document engine

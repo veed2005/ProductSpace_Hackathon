@@ -1,0 +1,90 @@
+{
+  "form_id": "sample_benefits",
+  "name": "Sample Benefits Application",
+  "version": 1,
+  "reviewed": true,
+  "fields": [
+    {
+      "id": "applicant_name",
+      "label": "Full name",
+      "type": "text",
+      "required": true,
+      "question_hint": "What is your full name?",
+      "pdf_field": "applicant_name",
+      "profile_key": "full_name",
+      "group": "About you"
+    },
+    {
+      "id": "date_of_birth",
+      "label": "Date of birth",
+      "type": "date",
+      "required": true,
+      "question_hint": "What is your date of birth?",
+      "pdf_field": "date_of_birth",
+      "profile_key": "date_of_birth",
+      "group": "About you"
+    },
+    {
+      "id": "address",
+      "label": "Home address",
+      "type": "address",
+      "required": true,
+      "question_hint": "What is your home address?",
+      "pdf_field": "address",
+      "profile_key": "address",
+      "group": "About you"
+    },
+    {
+      "id": "household_size",
+      "label": "People in household",
+      "type": "number",
+      "required": true,
+      "question_hint": "How many people live with you, including you?",
+      "pdf_field": "household_size",
+      "profile_key": "household_size",
+      "group": "Household"
+    },
+    {
+      "id": "employed",
+      "label": "Currently working",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Are you working right now?",
+      "pdf_field": "employed",
+      "pdf_values": {"yes": "Yes", "no": "Off"},
+      "group": "Income"
+    },
+    {
+      "id": "employer",
+      "label": "Employer",
+      "type": "text",
+      "required": false,
+      "question_hint": "Who do you work for?",
+      "pdf_field": "employer",
+      "profile_key": "employment.employer",
+      "condition": {"field": "employed", "equals": "yes"},
+      "group": "Income"
+    },
+    {
+      "id": "monthly_income",
+      "label": "Monthly income",
+      "type": "money",
+      "required": true,
+      "question_hint": "About how much money does your household get each month, before taxes?",
+      "pdf_field": "monthly_income",
+      "profile_key": "monthly_income",
+      "group": "Income"
+    },
+    {
+      "id": "ssn_last4",
+      "label": "Last 4 of SSN",
+      "type": "ssn_last4",
+      "required": false,
+      "question_hint": "What are the last four digits of your Social Security number? You can skip this.",
+      "pdf_field": "ssn_last4",
+      "sensitive": true,
+      "validation": "^\\d{4}$",
+      "group": "About you"
+    }
+  ]
+}
