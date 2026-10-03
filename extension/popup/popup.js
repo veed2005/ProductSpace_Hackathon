@@ -21,14 +21,21 @@ async function server() {
 }
 
 async function post(path, body) {
-  const res = await fetch((await server()) + path, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  });
+  const base = await server();
+  let res;
+  try {
+    res = await fetch(base + path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+  } catch (e) {
+    throw new Error(`Formline couldn't be reached at ${base}. Is the server running?`);
+  }
   let data = {};
-  try { data = await res.json(); } catch (e) { /* empty body */ }
+  try { data = await res.json(); } catch (e) { /* empty or non-JSON body */ }
   if (!res.ok) {
     const detail = data.detail;
-    throw new Error((detail && (detail.message || detail)) || "Formline couldn't be reached.");
+    const message = detail && (detail.message || (typeof detail === "string" ? detail : null));
+    throw new Error(message || `Formline had a problem (error ${res.status}). Please try again.`);
   }
   return data;
 }

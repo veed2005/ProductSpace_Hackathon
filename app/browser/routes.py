@@ -52,7 +52,7 @@ class DevCommand(BaseModel):
 
 
 def _error(e: pairing.PairingError) -> HTTPException:
-    status = 429 if e.code in ("rate_limited", "too_many_attempts") else 400
+    status = 429 if e.code in ("rate_limited", "too_many_attempts") else 502 if e.code == "delivery_failed" else 400
     return HTTPException(status, {"code": e.code, "message": e.message})
 
 

@@ -98,9 +98,34 @@ def start_pairing(phone_raw: str, delivery: str = "sms") -> PairingStart:
         s.add(PairingRequest(id=pairing_id, phone=phone, code_hash=_hash(pairing_id, code), delivery=delivery,
                              expires_at=_now() + CODE_TTL))
         s.commit()
-    deliver_code(phone, code, delivery)
+    try:
+        deliver_code(phone, code, delivery)
+    except Exception as e:
+        # Nothing was sent, so this attempt shouldn't count against the number's limit.
+        with session_scope() as s:
+            req = s.get(PairingRequest, pairing_id)
+            if req is not None:
+                s.delete(req)
+                s.commit()
+        log.warning("pairing code delivery (%s) to %s failed: %s", delivery, phone, e)
+        raise PairingError("delivery_failed", _delivery_problem(e, delivery))
     dev = code if (get_settings().dev_endpoints and not twilio_configured()) else None
     return PairingStart(pairing_id, phone, delivery, dev)
+
+
+def _delivery_problem(error: Exception, delivery: str) -> str:
+    """What to tell the person when Twilio won't send the code."""
+    code = getattr(error, "code", None)
+    if code in (21215, 21216, 13227, 21408, 21612):  # geo permissions / region not enabled
+        what = "call" if delivery == "call" else "text"
+        other = "Text me" if delivery == "call" else "Call me"
+        return (f"Formline isn't allowed to {what} that number yet (Twilio error {code}: outbound "
+                f"{'calls' if delivery == 'call' else 'texts'} to this country are turned off for the account). "
+                f"Try “{other}”, or ask whoever runs the Twilio account to enable it.")
+    if code in (21211, 21614, 21217):
+        return "That doesn't look like a phone number Twilio can reach. Check the number and try again."
+    return f"Formline couldn't {'call' if delivery == 'call' else 'text'} that number just now ({error.__class__.__name__}" \
+           f"{f' {code}' if code else ''}). Try again in a minute."
 
 
 def deliver_code(phone: str, code: str, delivery: str) -> None:

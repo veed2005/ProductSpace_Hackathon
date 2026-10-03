@@ -152,3 +152,22 @@ def test_websocket_refuses_web_pages():
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/browser/ws", headers={"origin": "https://evil.example"}) as ws:
                 ws.receive_json()
+
+
+def test_failed_delivery_explains_why_and_does_not_use_up_the_limit(monkeypatch):
+    class TwilioRefused(Exception):
+        code = 21215
+
+    def refuse(phone, code, delivery):
+        raise TwilioRefused("Account not authorized to call +17733086960")
+
+    monkeypatch.setattr(pairing, "deliver_code", refuse)
+    for _ in range(pairing.MAX_REQUESTS_PER_PHONE + 1):
+        with pytest.raises(pairing.PairingError) as e:
+            pairing.start_pairing("+17733086960", delivery="call")
+        assert e.value.code == "delivery_failed"
+        assert "isn't allowed to call that number" in e.value.message and "Text me" in e.value.message
+    with session_scope() as s:
+        from app.models import PairingRequest
+
+        assert s.exec(select(PairingRequest)).all() == []  # never counted toward the limit
