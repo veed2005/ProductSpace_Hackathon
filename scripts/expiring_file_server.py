@@ -20,7 +20,7 @@ from pathlib import Path
 
 class ExpiringServer:
     def __init__(self, path: str | Path, port: int = 8799, *, valid_s: float = 4.0, cache_control: str = "",
-                 max_hits: int = 0):
+                 max_hits: int = 0, url_name: str = ""):
         self.data = Path(path).read_bytes()
         self.name = Path(path).name
         self.port = port
@@ -29,7 +29,8 @@ class ExpiringServer:
         self.max_hits = max_hits  # if set, only this many requests ever succeed (Chrome's viewer itself makes 2)
         self.first: float | None = None
         self.hits = 0
-        self.url = f"http://127.0.0.1:{port}/docs/{self.name}?X-Amz-Expires=60&X-Amz-Signature=demo"
+        # url_name: e.g. "original", like portal links that end without a file name
+        self.url = f"http://127.0.0.1:{port}/docs/{url_name or self.name}?X-Amz-Expires=60&X-Amz-Signature=demo"
 
     def __enter__(self) -> "ExpiringServer":
         outer = self

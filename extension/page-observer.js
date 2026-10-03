@@ -161,6 +161,9 @@
     }
     const t = textOf(el);
     if (t) return t;
+    // Icon links often keep their word in a hidden span (<span class="label">Search</span>): use it.
+    const hiddenText = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (hiddenText && hiddenText.length <= 40) return hiddenText;
     const img = el.querySelector("img[alt]");
     if (img && img.alt) return img.alt;
     const svgTitle = el.querySelector("svg title");
@@ -177,7 +180,8 @@
 
   // "/film/the-ritual-2017/" -> "the ritual 2017"; "/search/" -> "search". Ids and hashes are skipped.
   function linkName(el) {
-    if (el.tagName !== "A" || !el.getAttribute("href")) return "";
+    const raw = el.getAttribute("href");
+    if (el.tagName !== "A" || !raw || /^(#|javascript:)/i.test(raw.trim())) return "";  // goes nowhere: no name in it
     let path;
     try { path = new URL(el.href, location.href).pathname; } catch (e) { return ""; }
     const seg = path.split("/").filter(Boolean).pop() || "";

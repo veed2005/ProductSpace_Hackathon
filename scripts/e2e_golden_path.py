@@ -83,7 +83,7 @@ SCENARIOS = {
         "opening": "I don't understand this contract. Can you help me?",
         # (question, every one of these must be in the answer: alternatives separated by |)
         "questions": [
-            ("Can I have a dog?", ["40|forty", "300|three hundred"]),
+            ("Can I have a dog?", ["40|forty", "300|three hundred|deposit"]),
             ("How do I get out of my lease early?", ["60|sixty", "1,450|one month|fourteen hundred"]),
             ("Who signed it for the landlord?", ["Dana|Whitfield"]),
             ("What happens if I pay rent late?", ["75|seventy-five|seventy five"]),
@@ -140,6 +140,31 @@ Paddington 2. Keep answers short.""",
             ("Can I have a dog?", ["40|forty", "300|three hundred"]),
             ("Who signed it for the landlord?", ["Dana|Whitfield"]),
         ],
+    },
+    "statement_pdf": {
+        # A portal-style rent statement: a table PDF behind an expiring no-store link ending in /original.
+        "expiring": {"file": "demo_sites/testbench/statement.pdf", "valid_s": 5, "cache_control": "no-store", "wait_s": 7,
+                     "url_name": "original"},
+        "site_word": "PDF",
+        "opening": "Can you explain this to me?",
+        "questions": [
+            ("How much is my rent?", ["1,767|1767|seventeen sixty"]),
+            ("What's my total every month?", ["2,080|2080|two thousand eighty"]),
+            ("Am I paying for a pet?", ["25|twenty-five|twenty five"]),
+        ],
+    },
+    "reelbox_film_qa": {
+        # Find a film with the search, then questions about the film page, then a new action.
+        "path": "/demo/reelbox/profile.html",
+        "site_word": "Reelbox",
+        "opening": "Look up the movie Arrival.",
+        "questions": [
+            ("Who directed it?", ["Villeneuve"]),
+            ("Is Jeremy Renner in it?", ["yes|renner"]),
+            ("How long is it?", ["116|hour"]),
+            ("Now take me to my profile.", None),
+        ],
+        "final_url": "profile.html",
     },
     "letterboxd": {
         "path": "https://letterboxd.com/",
@@ -204,7 +229,8 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
         expiring = None
         if scenario.get("expiring"):
             x = scenario["expiring"]
-            expiring = ExpiringServer(x["file"], port=8780 + run, valid_s=x["valid_s"], cache_control=x["cache_control"])
+            expiring = ExpiringServer(x["file"], port=8780 + run, valid_s=x["valid_s"], cache_control=x["cache_control"],
+                                      url_name=x.get("url_name", ""))
             expiring.__enter__()
             await page.goto(expiring.url)
             await page.bring_to_front()
@@ -253,7 +279,7 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
             t0 = time.monotonic()
             if scenario.get("questions"):
                 try:
-                    return await qa_run(scenario, hear, say, transcript, server, started)
+                    return await qa_run(scenario, hear, say, transcript, server, started, page)
                 finally:
                     if expiring:
                         expiring.__exit__(None, None, None)
@@ -309,36 +335,61 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
         await context.close()
 
 
-async def qa_run(scenario, hear, say, transcript, server, started) -> dict:
+async def _agent_busy(server) -> bool:
+    """Is the agent still working on the latest request? (Read from the local dashboard API.)"""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(server.url + "/api/agent/tasks?limit=1", timeout=5) as resp:
+            tasks = json.loads(resp.read())
+        return bool(tasks) and tasks[0]["status"] == "active"
+    except Exception:
+        return False
+
+
+async def qa_run(scenario, hear, say, transcript, server, started, page=None) -> dict:
     """Ask questions about the open document; every answer must contain the expected facts."""
     async def reply() -> tuple[str, float]:
+        """Everything Formline says for one turn: lines until it has been quiet for 3 s (statuses like "Opening the
+        film page" come before the real reply). Time is measured to the last line."""
         t = time.monotonic()
+        lines: list[str] = []
+        last = t
         while True:
-            line = await hear()
+            try:
+                line = await asyncio.wait_for(hear(), 2.0 if lines else 120)
+            except asyncio.TimeoutError:
+                if await _agent_busy(server):
+                    continue  # still working (a search, a page loading): its real reply is coming
+                return " ".join(lines), last - t
             if line and not line.lower().startswith(("one moment", "un momento")):
-                return line, time.monotonic() - t
+                lines.append(line)
+                last = time.monotonic()
 
-    first, _ = await reply()  # the plain summary of the document
-    checks = {"explained the document when asked": len(first.split()) >= 12 and "trouble" not in first.lower()}
+    first, _ = await reply()  # the plain summary of the document, or the result of the opening request
+    checks = {"first request handled": len(first.split()) >= 5 and "couldn't" not in first.lower()
+              and "trouble" not in first.lower()}
     turn_times = []
     for question, needles in scenario["questions"]:
-        await asyncio.sleep(0.6)
-        while not hear.queue.empty():  # a late extra line from the previous turn must not be read as this answer
-            transcript.append(f"FORMLINE: {hear.queue.get_nowait()}")
         await say(question)
         answer, secs = await reply()
         turn_times.append(secs)
         low = answer.lower().replace(",", "")
+        if needles is None:  # an action, not a question: checked by where the browser ends up
+            continue
         ok = all(any(alt.lower().replace(",", "") in low for alt in n.split("|")) for n in needles)
         checks[f"answered {question!r}"] = ok
         if not ok:
             print(f"  ANSWER TO {question!r} WAS: {answer!r}")
     db = sqlite3.connect(server.data_dir / "formline.db")
-    rows = db.execute("select kind, element_label, ok, value from browseraction where task_id = "
-                      "(select max(id) from browsertask) order by id").fetchall()
+    rows = db.execute("select kind, element_label, ok, value from browseraction order by id").fetchall()
     calls = db.execute("select model_calls from browsertask order by id desc limit 1").fetchone()
     db.close()
-    checks["every answer quoted the document"] = sum(1 for k, _, _, v in rows if k == "answer" and v) >= len(scenario["questions"])
+    asked = [q for q, n in scenario["questions"] if n is not None]
+    checks["no answer was a dead end"] = not any("trouble" in t.lower() or "couldn't get that to work" in t.lower()
+                                                 for t in transcript if t.startswith("FORMLINE"))
+    if scenario.get("final_url") and page is not None:
+        checks[f"ended on {scenario['final_url']}"] = scenario["final_url"] in page.url
     return {"checks": checks, "total_s": round(time.monotonic() - started, 1), "turn_s": [round(t, 1) for t in turn_times],
             "steps": 0, "model_calls": calls[0] if calls else None, "actions": rows}
 

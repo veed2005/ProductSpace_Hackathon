@@ -176,3 +176,15 @@ def test_a_new_document_or_a_whole_new_page_is_said_plainly():
     assert "Most of the page changed" in page_text(swapped, previous=before)
     assert "+ " not in page_text(swapped, previous=before).split("\n\n", 1)[1]
     assert "Nothing changed" in page_text(before, previous=before)
+
+
+def test_source_files_have_no_stray_control_characters():
+    """A mangled escape (a literal backspace where \b was meant) silently breaks a regex; it happened twice."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for folder in ("app", "extension", "scripts"):
+        for p in (root / folder).rglob("*"):
+            if p.suffix in (".py", ".js") and p.is_file():
+                text = p.read_text(encoding="utf-8")
+                assert not any(ord(c) < 32 and c not in "\n\r\t" for c in text), p

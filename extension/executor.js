@@ -296,6 +296,14 @@
         }
       }
       if (c.closest("header, nav, [role=banner]")) s += 1;
+      // An unnamed icon right next to the hidden box is almost always its opener (Letterboxd's magnifying
+      // glass is a nameless link). Not links that go to another page, though.
+      const href = c.getAttribute("href");
+      const goesElsewhere = c.tagName === "A" && href && !/^(#|javascript:)/i.test(href) && !/search/i.test(href);
+      if (input && !name.trim() && !goesElsewhere && c.parentElement &&
+          (c.parentElement.contains(input) || (c.parentElement.parentElement && c.parentElement.parentElement.contains(input)))) {
+        s += 3;
+      }
       if (s > bestScore) {
         best = c;
         bestScore = s;
@@ -332,6 +340,10 @@
     const steps = [];
     let input = null;
     let toggle = null;
+    // Submitting may load a new page and end this script: leave the story so far with the service worker.
+    const report = (lines) => {
+      try { chrome.runtime.sendMessage({ kind: "formline_search_progress", detail: lines.join("; ") }); } catch (e) { /* reloaded */ }
+    };
     if (args.element_id) {
       const { el, reason } = Obs.lookup(args.element_id);
       if (!el) throw new ActionError(reason, "That search box is no longer on the page.");
@@ -341,17 +353,33 @@
     if (!input || !Obs.shownEnough(input)) {
       const hidden = input || bestSearchBox({ visible: false });
       toggle = searchToggle(hidden);
-      if (!toggle) {
-        throw new ActionError("not_found", "There's no site search box on this page, and no search button to open one. " +
-          "Look for a search link or menu, or use a box on the page by its id.");
+      if (toggle) {
+        highlight(toggle);
+        realClick(toggle);
+        steps.push(`opened the search with “${Obs.clean(Obs.nameOf(toggle, "button")) || "the search icon"}”`);
+        // Wait for it to finish opening (sites animate this); never click the toggle twice, that closes it.
+        input = await waitFor(() => (hidden && Obs.shownEnough(hidden) && !animating() ? hidden : null) ||
+          (!animating() && bestSearchBox({ visible: true })), 2500);
+      } else {
+        input = null;
       }
-      highlight(toggle);
-      realClick(toggle);
-      steps.push(`opened the search with “${Obs.clean(Obs.nameOf(toggle, "button"))}”`);
-      // Wait for it to finish opening (sites animate this); never click the toggle twice, that closes it.
-      input = await waitFor(() => (hidden && Obs.shownEnough(hidden) && !animating() ? hidden : null) ||
-        (!animating() && bestSearchBox({ visible: true })), 2500);
-      if (!input) throw new ActionError("not_visible", "Clicked the search button, but no search box appeared.");
+      if (!input && hidden && hidden.form) {
+        // It won't open on screen, but the site's search form is there: send the search through it directly.
+        const proto = hidden.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, "value").set.call(hidden, query);
+        hidden.dispatchEvent(new Event("input", { bubbles: true }));
+        report([...steps, `the search box stayed hidden, so I sent “${query}” through the site's search form; a new page opened`]);
+        hidden.form.requestSubmit();
+        await sleep(1500);
+        return { success: navigating || location.href !== urlBefore, action: "search", url_before: urlBefore,
+          url_after: location.href, page_changed: true, navigating, value: query,
+          detail: [...steps, "the search box stayed hidden, so I sent the search through the site's search form"].join("; "),
+          error: navigating || location.href !== urlBefore ? null : "no_effect" };
+      }
+      if (!input) {
+        throw new ActionError("not_found", "This page has no search box I can open. If what the caller wants is " +
+          "linked on the page, open that link; otherwise look for a page called Search or Films.");
+      }
     }
     const box = Obs.clean(Obs.nameOf(input, "searchbox")) || "the search box";
     input.scrollIntoView({ block: "center" });
@@ -361,11 +389,7 @@
       await typeText(input, query);
       steps.push(`typed “${query}” into “${box}”`);
       const suggestions = await waitForSuggestions(input, counter, 1500);
-      // Submitting may load a new page and end this script: leave the story so far with the service worker.
-      const report = (extra) => {
-        try { chrome.runtime.sendMessage({ kind: "formline_search_progress", detail: [...steps, ...extra].join("; ") }); } catch (e) { /* reloaded */ }
-      };
-      report(["submitted it; a new page opened"]);
+      report([...steps, "submitted it; a new page opened"]);
       let how = null;
       const handled = !pressEnter(input);
       if (await reacted(counter, urlBefore, 700)) {

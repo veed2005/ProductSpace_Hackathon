@@ -92,7 +92,7 @@ def page_text(state: PageState, previous: Optional[PageState] = None) -> str:
     return "\n".join(head + [""] + lines)
 
 
-_LOADING = re.compile(r"^(loading|please wait|cargando|espere)|^(processing|one moment|un momento)[\s.…!]*$|"
+_LOADING = re.compile(r"^(loading|please wait|cargando|espere)\b|^(processing|one moment|un momento)[\s.…!]*$|"
                       r"^(\w+ing)(…|\.\.\.)$", re.IGNORECASE)
 
 

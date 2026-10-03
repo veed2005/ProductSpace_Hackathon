@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Send a screenshot to the model when a page's text snapshot is nearly empty (canvas apps, image-only
     # pages). Off by default: a screenshot skips the in-browser redaction of secrets.
     vision_fallback: bool = Field(False, alias="FORMLINE_VISION_FALLBACK")
+    # A screenshot of what the person sees goes with the agent's first look after they speak, so it can explain
+    # what's on their screen. Screenshots can't be redacted the way page text is; false turns them off.
+    screenshots: bool = Field(True, alias="FORMLINE_SCREENSHOTS")
 
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

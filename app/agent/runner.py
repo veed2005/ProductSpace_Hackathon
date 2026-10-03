@@ -55,7 +55,7 @@ SAY = {
         "gone": "I lost the connection to your browser. Make sure your computer is on and Chrome is open, then tell me when you're ready.",
         "no_page": "I can't see a web page right now. Open the website you need in Chrome, then tell me when it's up.",
         "error": "Sorry, something went wrong on my end. Could you say that again?",
-        "trouble": "I'm having trouble with this page. Could you tell me another way to do this, or try again in a moment?",
+        "trouble": "Sorry, I couldn't get that to work on this page. What would you like me to try?",
         "long": "This is taking a while. Should I keep going?",
         "confirm_q": "Should I go ahead?",
         "press": "I'm ready to press {label}. Should I go ahead?",
@@ -68,7 +68,7 @@ SAY = {
         "gone": "Perdí la conexión con su navegador. Asegúrese de que la computadora esté encendida y Chrome abierto, y avíseme.",
         "no_page": "No veo ninguna página abierta. Abra el sitio que necesita en Chrome y avíseme.",
         "error": "Perdón, algo salió mal. ¿Puede repetirlo?",
-        "trouble": "Tengo problemas con esta página. ¿Me dice otra forma de hacerlo, o lo intento de nuevo en un momento?",
+        "trouble": "Perdón, no pude hacerlo en esta página. ¿Qué quiere que intente?",
         "long": "Esto está tardando. ¿Sigo intentando?",
         "confirm_q": "¿Lo hago?",
         "press": "Estoy listo para presionar {label}. ¿Lo hago?",
@@ -146,6 +146,19 @@ def _trace(prompt: str, decision: Decision, ms: int) -> None:
         f.write(json.dumps({"ms": ms, "prompt": prompt, "decision": decision.model_dump()}) + "\n")
 
 
+# A question about what's on screen ("who's Peter New?", "how much is my rent", "explain this"): the agent gets a
+# screenshot with its first look, so it can answer from what the person actually sees. Commands don't need one.
+_QUESTION = re.compile(r"\?\s*$|^(what|who|whom|whose|where|when|why|how|which|is|are|was|were|am|can|could|does|do|did|"
+                       r"will|would|should|explain|tell me|read|describe|summari[sz]e|whats|whos|wheres|hows|"
+                       r"qué|que|quién|quien|dónde|donde|cuándo|cuando|por qué|cómo|como|cuál|cual|cuánto|cuanto|"
+                       r"explica|explíca|lee|léeme|dime)\b")
+
+# "Keep going", "try again", "OK I logged in": the caller wants the same task to continue.
+_CONTINUE = re.compile(r"^(ok|okay|yes|yeah|sure|continue|keep going|go on|go ahead|try again|resume|done|ready|"
+                       r"i did( it)?|i ve done it|i (ve |have )?(logged|signed) in|it s (done|open|loaded|ready)|"
+                       r"sigue|continúa|continua|listo|ya)\b")
+
+
 def _page_key(page: PageState) -> str:
     """Which page this is, for spotting a click that keeps not working: the address plus its headings. A wizard's
     "Next" on each new step is a different page; "More..." pressed again on an unchanged page is the same."""
@@ -153,12 +166,24 @@ def _page_key(page: PageState) -> str:
     return f"{page.url}#{heads}"
 
 
+def _number(match: re.Match) -> str:
+    """'$1,767.00' -> '1767', '2,080.50' -> '2080_5': one token per amount, so '$1,950' can't pass for '$1,767'
+    by sharing a '$1' and a '00', and '$1,767' still matches '$1,767.00'."""
+    raw = match.group().replace("$", "").replace(",", "")
+    try:
+        value = float(raw)
+    except ValueError:
+        return raw
+    return (str(int(value)) if value == int(value) else repr(value)).replace(".", "_")
+
+
 def _norm(text: str) -> str:
     """For matching quoted evidence against page text: case, punctuation and spacing don't matter, so a
-    quote that spans a heading and the line under it still matches."""
+    quote that spans a heading and the line under it still matches; amounts compare as whole numbers."""
     text = (text or "").replace("’", "'").casefold()
     text = re.sub(r"\[\w+\]", " ", text)  # snapshot ids the model may have copied, like [e12]
-    return " ".join(re.sub(r"[^\w$']+", " ", text).split())
+    text = re.sub(r"\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$?\d+\.\d+|\$\d+", _number, text)
+    return " ".join(re.sub(r"[^\w']+", " ", text).split())
 
 
 class BrowserAgent:
@@ -189,6 +214,8 @@ class BrowserAgent:
         self.required_confirmation = False
         self.confirmed_executed = False
         self.last_spoke = 0.0
+        self.last_outcome: Optional[str] = None  # question | answer | blocked | trouble | stopped | completed
+        self._fresh_turn = False  # the next decision is the first since the caller spoke
         self._loop_task: Optional[asyncio.Task] = None
         self._stopping = False
 
@@ -222,11 +249,14 @@ class BrowserAgent:
         if is_stop(text) and self.task_id and self.status in ("active", "waiting_input"):
             await self.stop(spoken=True)
             return
-        if self.task_id is None or self.status in ("completed", "failed"):
-            await self._new_task(text)
+        answering = bool(self.pending and self.pending.get("type") == "question")
+        carry_on = self.last_outcome in ("blocked", "trouble", "stopped", "long") and _CONTINUE.match(_norm(text))
+        if self.task_id is None or not (answering or carry_on):
+            await self._new_task(text)  # a new request ("who's Peter New?", "check my profile") starts fresh
         else:
             self.pending = None
             self._persist(status="active", pending={})
+        self._fresh_turn = bool(_QUESTION.search(text) or _QUESTION.match(_norm(text)))  # show it the screen
         self._start(self._loop())
 
     async def stop(self, *, spoken: bool = True) -> None:
@@ -242,6 +272,7 @@ class BrowserAgent:
         self._stopping = False
         self.pending = None
         self.required_confirmation = False
+        self.last_outcome = "stopped"
         if self.task_id:
             self._persist(status="stopped", pending={})
             store.add_action(self.task_id, "stopped", reason="Caller said stop")
@@ -319,9 +350,9 @@ class BrowserAgent:
         self.history, self.notes = [], []
         self._done_steps = []
         if earlier:
-            self.notes.append("This is a NEW request. Earlier conversation is context only: don't reuse details "
-                              "from earlier requests (like which movie or which date) unless the caller refers to "
-                              "them. If the new request is missing something, ask.")
+            self.notes.append("This is the caller's latest request. Use the earlier conversation for context when "
+                              "they refer back to something ('that one', 'what about dogs?'), but don't fill in "
+                              "details they haven't given for this request (like which movie); ask instead.")
         self.steps = self.model_calls = 0
         self.required_confirmation = self.confirmed_executed = False
         self.task_id = store.create_task(profile_id=self.profile_id, installation_id=self.installation_id,
@@ -334,6 +365,7 @@ class BrowserAgent:
 
     async def _loop(self) -> None:
         errors = 0
+        doubted = False  # an answer's quote already failed once this turn
         narrated = False
         for _ in range(MAX_DECISIONS):
             page = await self._page()
@@ -341,6 +373,7 @@ class BrowserAgent:
             kind = decision.kind
 
             if kind == "ask_user":
+                self.last_outcome = "question"
                 self.pending = {"type": "question", "say": decision.say}
                 self._persist(status="waiting_input", pending=self.pending)
                 store.add_action(self.task_id, "ask", element_label=decision.say, reason=decision.reason)
@@ -349,20 +382,23 @@ class BrowserAgent:
 
             if kind == "answer":
                 problem = self._unsupported(decision.evidence, page) if decision.evidence else None
-                if problem:
+                if problem and not doubted:
+                    # One chance to quote it better; after that the answer is given anyway and flagged on the
+                    # dashboard. A person asking about their own screen must never get a dead end.
+                    doubted = True
                     store.add_action(self.task_id, "unverified", element_label=decision.evidence, ok=False, error=problem)
                     self.notes.append(problem)
-                    errors += 1
-                    if errors >= MAX_ERRORS:
-                        break
                     continue
                 self._persist(status="waiting_input", pending={})
                 store.add_action(self.task_id, "answer", element_label=decision.say, value=decision.evidence,
-                                 reason=decision.reason)
+                                 reason=decision.reason, ok=not problem,
+                                 error="Its quote couldn't be confirmed on the page" if problem else None)
+                self.last_outcome = "answer"
                 await self._say(decision.say)
                 return
 
             if kind == "blocked":
+                self.last_outcome = "blocked"
                 self._persist(status="waiting_input", pending={})
                 store.add_action(self.task_id, "blocked", element_label=decision.say, reason=decision.reason, ok=False)
                 await self._say(decision.say)
@@ -372,6 +408,7 @@ class BrowserAgent:
                 ok, why = await self._verify_done(decision)
                 if ok:
                     store.add_action(self.task_id, "verified", element_label=decision.evidence, reason=decision.reason)
+                    self.last_outcome = "completed"
                     self._persist(status="completed", pending={}, result=f"{decision.say} [page: {decision.evidence}]")
                     log_event("browser_task_completed", profile_id=self.profile_id, channel=self.channel,
                               steps=self.steps, model_calls=self.model_calls)
@@ -449,9 +486,11 @@ class BrowserAgent:
             if errors >= MAX_ERRORS:
                 break
         else:
+            self.last_outcome = "long"
             self._persist(status="waiting_input")
             await self._say(self._t("long"))
             return
+        self.last_outcome = "trouble"
         self._persist(status="waiting_input")
         await self._say(self._t("trouble"))
 
@@ -498,17 +537,20 @@ class BrowserAgent:
                 f"Steps you have taken in the browser:\n{steps}\n\nNotes for this turn:\n{notes}")
         content: object = user
         images: list[str] = list(page.document.images) if page.document else []
+        if images:
+            self._fresh_turn = False
         note = ""
         if images and page.document and page.document.on_screen_only:
             note = "\n\nThe picture attached is the part of the PDF visible on screen, nothing more."
         elif images:
             note = "\n\nThe pictures attached are the PDF's pages, in order. Read them to answer."
         else:
-            shot = await self._vision_fallback(page)
+            shot = await self._screen(page)
             if shot:
                 images = [shot]
-                note = ("\n\nA screenshot of the visible page is attached because the snapshot has little text. "
-                        "Use it to understand the page; you can still only act on ids in the snapshot.")
+                note = ("\n\nA screenshot of what the person sees right now is attached. Use it to understand and "
+                        "explain what's on their screen (including things the text snapshot misses); act only "
+                        "through the ids in the snapshot.")
         if images:
             content = [*({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": i}}
                          for i in images), {"type": "text", "text": user + note}]
@@ -528,12 +570,17 @@ class BrowserAgent:
                  [(s.action, s.element_id, s.value) for s in decision.steps], decision.reason)
         return decision
 
-    async def _vision_fallback(self, page: PageState) -> Optional[str]:
-        """A screenshot, only if FORMLINE_VISION_FALLBACK is on and the snapshot is nearly empty."""
-        if not get_settings().vision_fallback or not hasattr(self.browser, "screenshot"):
+    async def _screen(self, page: PageState) -> Optional[str]:
+        """A screenshot of what the person sees: for the first look after they ask something (so questions about
+        their screen are answered from what they actually see), after a failed step, or when the page has almost
+        no text. FORMLINE_SCREENSHOTS=false turns it off."""
+        fresh, self._fresh_turn = self._fresh_turn, False
+        if not hasattr(self.browser, "screenshot"):
             return None
-        meaningful = [e for e in page.elements if (e.label or "").strip()]
-        if len(meaningful) >= 4:
+        sparse = len([e for e in page.elements if (e.label or "").strip()]) < 4
+        failed = any("failed" in n or "was not run" in n for n in self.notes)
+        s = get_settings()
+        if not (s.screenshots and (fresh or failed or sparse)) and not (s.vision_fallback and sparse):
             return None
         return await self.browser.screenshot()
 
@@ -580,13 +627,27 @@ class BrowserAgent:
     @staticmethod
     def _unsupported(evidence: Optional[str], page: PageState) -> Optional[str]:
         """None if the quote is on the page (or in its document) as the model saw it, else the problem.
-        A summary may stitch several quotes with "..." or line breaks: every piece of 3+ words must be there."""
+
+        A quote may stitch several pieces with "...", line breaks or sentence ends. A piece counts if it appears
+        word for word, or if its words are there even though the layout separates them: a short piece (up to 6
+        words, like a name next to "Cast", or a label and its amount in a table) needs 80% of its words, a
+        longer one 90%. Made-up quotes still fail; real ones from tables and lists no longer do."""
         hay = _norm(page_text(page))
+        words_on_page = set(hay.split())
         cleaned = re.sub(r"\[Page \d+ of \d+\]", "\n", evidence or "")
-        # Split at "...", line breaks, and sentence ends: each piece must be real, wherever it is.
         pieces = [_norm(p) for p in re.split(r"\.\.\.|…|\n|(?<=[.!?])[\"”)]?\s+(?=[\"“(]?[A-Z0-9])", cleaned)]
-        pieces = [p for p in pieces if len(p.split()) >= 3] or [_norm(cleaned)]
-        if pieces[0] and all(p in hay for p in pieces):
+        pieces = [p for p in pieces if p]
+
+        def there(piece: str) -> bool:
+            if piece in hay:
+                return True
+            words = [w for w in piece.split() if len(w) >= 3 or any(c.isdigit() for c in w)]
+            if not words:
+                return True  # nothing meaningful to check ("a", "of")
+            share = sum(1 for w in words if w in words_on_page) / len(words)
+            return share >= (0.8 if len(words) <= 6 else 0.9)
+
+        if pieces and all(there(p) for p in pieces):
             return None
         return (f"Your evidence {evidence!r} is not on the current page or in its document. Quote the page "
                 "exactly, or answer without evidence only if the page doesn't say.")

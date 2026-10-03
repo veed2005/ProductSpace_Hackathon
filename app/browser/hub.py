@@ -130,11 +130,15 @@ class BrowserConnection:
         msg = await self.request("read_pdf", tab_id=state.tab_id, timeout=45)
         title = pdf.title_from_url(state.url)
         if not msg.get("ok"):
+            log.info("PDF unreadable: %s", msg.get("detail"))
             return PdfDocument(title=title, error=msg.get("detail") or "It couldn't be downloaded.")
         if msg["data"].get("screenshot_base64"):  # only what's on screen; not cached, the file may come back
+            log.info("PDF on screen only (%s): %s", msg["data"].get("reason"), title or "untitled")
             return pdf.on_screen(msg["data"]["screenshot_base64"], title, msg["data"].get("reason") or "")
         data = pdf.decode(msg["data"]["pdf_base64"])
         document = await run_in_threadpool(pdf.read, data, state.url)
+        log.info("PDF read: %s pages, %s chars%s%s", document.pages, len(document.text),
+                 " (scanned)" if document.scanned else "", f" error: {document.error}" if document.error else "")
         if not document.error:
             self._pdfs[state.url] = document
             while len(self._pdfs) > 4:

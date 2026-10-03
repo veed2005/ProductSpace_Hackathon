@@ -18,6 +18,10 @@ import pymupdf
 from app.browser.protocol import PdfDocument
 from app.browser.sanitize import mask
 
+# File names document portals give every file: not worth reading out as a title.
+_GENERIC_NAMES = {"original", "download", "view", "file", "document", "pdf", "attachment", "content", "inline",
+                  "preview", "show", "get", "blob", "index", "untitled", "doc", "open", "render", "data"}
+
 MAX_CHARS = 250_000  # about 60k tokens: the whole text of nearly any document a person would call about
 SCANNED_CHARS_PER_PAGE = 40
 MAX_IMAGE_PAGES = 8
@@ -25,10 +29,9 @@ MAX_IMAGE_PAGES = 8
 
 def _title(doc: pymupdf.Document, url: str) -> str:
     title = (doc.metadata or {}).get("title") or ""
-    if title.strip() and title.strip().lower() not in ("untitled", "microsoft word - document1"):
+    if title.strip() and title.strip().lower() not in _GENERIC_NAMES | {"microsoft word - document1"}:
         return title.strip()[:120]
-    name = unquote(urlparse(url).path.rsplit("/", 1)[-1]) or "document"
-    return re.sub(r"\.pdf$", "", name, flags=re.IGNORECASE).replace("_", " ").replace("-", " ").strip()[:120]
+    return title_from_url(url)
 
 
 def read(data: bytes, url: str) -> PdfDocument:
@@ -82,7 +85,9 @@ def title_from_url(url: str) -> str:
     """'https://bucket.s3.amazonaws.com/leases/Unit_3B-Lease.pdf?X-Amz-...' -> 'Unit 3B Lease' (empty if it's a random id)."""
     name = _title_from_url(url).replace("_", " ").replace("-", " ").strip()
     letters = sum(c.isalpha() for c in name)
-    return name if letters >= 3 and not re.fullmatch(r"[0-9a-f ]{16,}", name.lower()) else ""
+    if name.lower() in _GENERIC_NAMES or letters < 3 or re.fullmatch(r"[0-9a-f ]{16,}", name.lower()):
+        return ""
+    return name
 
 
 def on_screen(image_b64: str, title: str, reason: str) -> PdfDocument:

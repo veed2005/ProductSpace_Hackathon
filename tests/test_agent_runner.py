@@ -313,40 +313,102 @@ def test_confirm_with_several_steps_runs_the_lead_and_confirms_the_last():
     assert agent.pending["step"] == {"action": "click", "element_id": "next", "value": None}  # only the last waits
 
 
-def test_vision_fallback_is_opt_in_and_only_for_sparse_pages(monkeypatch):
+def test_the_person_s_screen_goes_with_the_first_look_after_they_speak(monkeypatch):
     from app.browser.protocol import PageElement, PageState
     from app.config import get_settings
 
-    sparse = PageState(doc_id="d1", url="https://app.test/", title="Canvas app",
-                       elements=[PageElement(id="e1", role="button", label="")])
+    full = PageState(doc_id="d1", url="https://app.test/", title="Film",
+                     elements=[PageElement(id=f"e{i}", role="link", label=f"Link {i}") for i in range(6)])
 
     class Shooter(FakeBrowser):
         async def page_state(self, *, fresh=False):
-            return sparse
+            return full
 
         async def screenshot(self):
             return "aGVsbG8="
 
-    def model_seeing(messages_box):
-        async def model(system, messages):
-            messages_box.append(messages[-1]["content"])
-            return Decision(kind="blocked", steps=[], say="I can't tell what's on this page.", reason="sparse",
-                            evidence=None)
-        return model
-
-    async def scenario():
+    def scenario():
         seen = []
-        agent = BrowserAgent(browser=Shooter(), say=lambda t: asyncio.sleep(0), profile_id=0, installation_id="x",
-                             phone="+15550001111", decide=model_seeing(seen))
-        await agent.handle("Click the blue thing")
-        await settle(agent)
+
+        async def model(system, messages):
+            seen.append(messages[-1]["content"])
+            return Decision(kind="answer", steps=[], say="It's a film page.", reason="x", evidence=None)
+
+        async def go():
+            agent = BrowserAgent(browser=Shooter(), say=lambda t: asyncio.sleep(0), profile_id=0,
+                                 installation_id="x", phone="+15550001111", decide=model)
+            await agent.handle("What am I looking at?")
+            await settle(agent)
+
+        run(go())
         return seen
 
-    assert all(isinstance(c, str) for c in run(scenario()))  # off by default: text only
-    monkeypatch.setenv("FORMLINE_VISION_FALLBACK", "true")
-    get_settings.cache_clear()
-    content = run(scenario())[0]
+    content = scenario()[0]
     assert content[0]["type"] == "image" and content[0]["source"]["data"] == "aGVsbG8="
+    assert "what the person sees right now" in content[-1]["text"]
+    monkeypatch.setenv("FORMLINE_SCREENSHOTS", "false")
+    get_settings.cache_clear()
+    assert isinstance(scenario()[0], str)  # off: text only
+
+
+def test_quotes_from_lists_and_tables_count():
+    from app.agent.runner import BrowserAgent as A
+    from app.browser.protocol import PageElement, PageState
+
+    film = PageState(doc_id="d", url="https://letterboxd.com/film/backrooms-2026/", title="Backrooms (2026)",
+                     elements=[PageElement(role="heading", label="CAST", level=2),
+                               PageElement(id="e40", role="link", label="Renée Rapp"),
+                               PageElement(id="e41", role="link", label="Peter New")])
+    assert A._unsupported('"Peter New" ... "CAST"', film) is None
+    assert A._unsupported("“Peter New” … “Cast”", film) is None
+    assert A._unsupported('"Peter Old" ... "CAST"', film)
+    table = PageState(doc_id="d", url="https://x/original", title="",
+                      elements=[PageElement(role="text", label="Rent Income Utilities Pet Rent"),
+                                PageElement(role="text", label="$1,767.00 $288.50 $25.00 Total: $2,080.50")])
+    assert A._unsupported("Rent Income $1,767.00 ... Total: $2,080.50", table) is None
+    assert A._unsupported("Rent Income $1,950.00", table)
+
+
+def test_an_answer_is_never_a_dead_end():
+    """Even if its quote can't be confirmed twice, the answer is spoken (and flagged), not 'I'm having trouble'."""
+    decisions = [
+        Decision(kind="answer", steps=[], say="Your rent is $1,767 a month.", reason="x", evidence="Rent: one thousand"),
+        Decision(kind="answer", steps=[], say="Your rent is $1,767 a month.", reason="x", evidence="Rent: one thousand"),
+    ]
+    agent, said, seen = _qa_agent(decisions, _lease_page())
+
+    async def scenario():
+        await agent.handle("How much is my rent?")
+        await settle(agent)
+
+    run(scenario())
+    assert said[-1] == "Your rent is $1,767 a month."
+    flagged = actions("answer")[0]
+    assert not flagged.ok and "couldn't be confirmed" in flagged.error
+
+
+def test_a_new_request_after_an_answer_starts_fresh_but_try_again_continues():
+    decisions = [
+        Decision(kind="answer", steps=[], say="Peter New plays Dan.", reason="x", evidence="Peter New"),
+        Decision(kind="answer", steps=[], say="Opening your profile.", reason="x", evidence=None),
+    ]
+    agent, said, seen = _qa_agent(decisions, _lease_page())
+
+    async def scenario():
+        await agent.handle("Who's Peter New?")
+        await settle(agent)
+        first = agent.task_id
+        await agent.handle("I wanna check my profile")
+        await settle(agent)
+        return first
+
+    first = run(scenario())
+    assert agent.task_id != first and agent.goal == "I wanna check my profile"
+    assert "Caller's goal: I wanna check my profile" in seen[-1]
+
+    from app.agent.runner import _CONTINUE, _norm
+    assert _CONTINUE.match(_norm("OK, I logged in")) and _CONTINUE.match(_norm("Try again"))
+    assert not _CONTINUE.match(_norm("Who is Peter New?"))
 
 
 # ---------------------------------------------------------------- answering questions from the page
@@ -433,13 +495,13 @@ def test_a_new_request_does_not_inherit_details_from_the_last_one():
     async def scenario():
         await agent.handle("Book with Dr. Smith")
         await settle(agent)
-        agent.status = "completed"
+        agent.status, agent.pending, agent.last_outcome = "completed", None, "completed"
         await agent.handle("Look up a movie")
         await settle(agent)
         return agent.decide
 
     model = run(scenario())
-    assert "This is a NEW request" in model.prompts[-1]
+    assert any("This is the caller's latest request" in p for p in model.prompts)
 
 
 def test_stitched_quotes_count_only_if_every_piece_is_real():
@@ -450,7 +512,7 @@ def test_stitched_quotes_count_only_if_every_piece_is_real():
             "The Lease begins on October 1, 2026 and ends on September 30, 2027. ... Monthly rent is $1,450.00")
     assert A._unsupported(real, page) is None
     assert A._unsupported("[Page 4 of 6]\n11. PETS. Tenant may keep up to two cats", page) is None
-    fake = "Monthly rent is $1,450.00 ... Tenant may keep any number of pets"
+    fake = "Monthly rent is $1,450.00 ... All pets are welcome without approval"
     assert A._unsupported(fake, page)
     sentences = ('Margaret Ellis ("Tenant"). The Lease begins on October 1, 2026 and ends on September 30, 2027. '
                  "Monthly rent is $1,450.00. This Lease, with Addendum A (Parking Rules) and Addendum B (Pet Policy), "

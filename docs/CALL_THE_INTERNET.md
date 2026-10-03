@@ -56,6 +56,8 @@ Also try: "**Stop**" mid-task (halts immediately), "**No**" at the confirmation 
 
 **PDFs:** open any PDF in Chrome (try http://localhost:8000/demo/testbench/lease.pdf) and ask about it: "I don't understand this contract", "Can I have a dog?", "How do I get out of my lease early?". Formline reads the whole document, every page, and each answer is backed by a quote from it (shown on the dashboard). It keeps a private copy of a PDF in that tab the moment it opens, so document portals' links that expire after a minute (S3 and similar, often marked no-store) still work later in the call. If a PDF was opened before Formline could keep a copy and its link has expired, it reads only what's on screen and says so; opening the document again from the website gives it the whole thing. PDFs saved on the computer (`file://`) need one switch: chrome://extensions → Formline → Details → **Allow access to file URLs**. Limits: 10 MB per PDF; about 250,000 characters of text (roughly 150 pages) are read; scanned PDFs with no text layer are read as pictures of their first 8 pages.
 
+**Asking about what's on screen:** "Who's Peter New?" on a film page, "How much is my rent?" on a statement. When you ask something, the agent gets a screenshot of what you see along with the page text, so it can answer from what's actually on your screen (tables, images, layout the text misses). Answers quote the page; a quote that can't be confirmed is flagged on the dashboard but the answer is still given, never a dead end. Each new request starts fresh; "try again", "keep going" or "OK, I logged in" continue the last one.
+
 **Searching sites:** "Look up Arrival" is one `search` step, done by code in the extension the same careful way every time: pick the site's main search box (not a filter for one person's reviews, not a box in a dialog), open it if it's hidden behind a search icon and wait until it has finished opening, type key by key, wait for suggestions, then submit with Enter, the form, or the search button. It reports what happened (results page, or the suggestions to click). http://localhost:8000/demo/reelbox/profile.html is a Letterboxd-like test page with an animated hidden search and decoy search boxes. The agent can't type web addresses, and a new request never inherits details (like which movie) from an earlier one; it asks.
 
 Reset between rehearsals: the portal's footer has **Reset demo data**; the dashboard's **Demo → Reset** wipes Formline's side.
@@ -89,7 +91,7 @@ The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `
 - **What leaves the browser:** a sanitized snapshot only. Password fields, hidden inputs, and fields that look like card numbers, SSNs, PINs or one-time codes are reported without values; SSN- and card-shaped numbers are masked in all text; query strings are dropped from URLs; cookies and storage are never read. The server scrubs again. Typing into secret fields is refused in the extension and in the policy.
 - **Page text is data.** The prompt says so, and the demo portal's inbox contains an injection attempt to test it.
 - **No security bypass.** CAPTCHAs, logins, MFA and verification codes are handed back to the person at the computer.
-- **Screenshots** (`FORMLINE_VISION_FALLBACK=true`) are off by default because they skip the redaction; when on, they're only sent for pages whose snapshot has almost no text.
+- **Screenshots** of the visible tab go to the model when the caller asks a question, after a failed step, or when a page has almost no text, so it can see what the person sees. They can't be redacted the way page text is (an SSN visible on screen would be in the picture), so `FORMLINE_SCREENSHOTS=false` turns them off.
 
 ## Failure handling
 
@@ -118,7 +120,7 @@ The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `
 ## Testing
 
 ```bash
-uv run pytest                                              # 391 offline tests (fake browser, scripted model)
+uv run pytest                                              # 395 offline tests (fake browser, scripted model)
 uv run python scripts/extension_smoke.py                   # real Chromium: pairing, actions, stale ids, privacy, screenshot
 uv run python scripts/e2e_golden_path.py --runs 3          # real model + Chromium + call simulator, golden demo
 uv run python scripts/e2e_golden_path.py --scenario library
@@ -128,6 +130,8 @@ uv run python scripts/e2e_golden_path.py --scenario reelbox         # "Look up A
 uv run python scripts/e2e_golden_path.py --scenario reelbox_vague   # "Look up a movie" must ask which one
 uv run python scripts/e2e_golden_path.py --scenario reelbox_profile # Letterboxd-like: hidden animated search, decoys
 uv run python scripts/e2e_golden_path.py --scenario reelbox_explore # a search with no form and no Enter
+uv run python scripts/e2e_golden_path.py --scenario reelbox_film_qa # search, questions about the film, then an action
+uv run python scripts/e2e_golden_path.py --scenario statement_pdf   # a rent table PDF behind an expired /original link
 uv run python scripts/agent_bench.py trace.jsonl --models gpt-5.4-mini,gpt-4.1-mini   # compare models on recorded prompts
 ```
 

@@ -14,7 +14,10 @@ const FILMS = [
   { id: "past-lives", title: "Past Lives", year: 2023, director: "Celine Song", rating: 4.2 },
   { id: "paddington-2", title: "Paddington 2", year: 2017, director: "Paul King", rating: 4.3 },
   { id: "the-iron-giant", title: "The Iron Giant", year: 1999, director: "Brad Bird", rating: 4.1 },
-  { id: "arrival", title: "Arrival", year: 2016, director: "Denis Villeneuve", rating: 4.1 },
+  { id: "arrival", title: "Arrival", year: 2016, director: "Denis Villeneuve", rating: 4.1, runtime: 116,
+    cast: ["Amy Adams", "Jeremy Renner", "Forest Whitaker", "Michael Stuhlbarg", "Tzi Ma"],
+    genres: ["Science Fiction", "Drama", "Mystery"],
+    synopsis: "Taking place after alien crafts land around the world, an expert linguist is recruited by the military to determine whether they come in peace or are a threat." },
   { id: "the-ritual", title: "The Ritual", year: 2017, director: "David Bruckner", rating: 3.2 },
 ];
 
@@ -57,9 +60,7 @@ function header() {
         <input type="text" name="q" class="search-field" placeholder="Search…" role="combobox" aria-expanded="false" aria-autocomplete="list">
         <ul class="ac" role="listbox" hidden></ul>
       </form>
-      <button class="search-toggle" type="button">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><use href="#icon-search"></use></svg>
-      </button>
+      <a href="#" class="nav-toggle"><span class="glyph"></span></a>
     </div>
     <button class="log-button" type="button">+ LOG</button>
     <a class="avatar" href="profile.html">linky</a>
@@ -69,7 +70,8 @@ function header() {
   // Like many sites: the click starts an opening animation and the field only becomes visible when it ends
   // (about half a second later). Clicking again, while opening or open, closes it.
   let opening = null;
-  box.querySelector(".search-toggle").addEventListener("click", () => {
+  box.querySelector(".nav-toggle").addEventListener("click", (e) => {
+    e.preventDefault();
     if (opening || box.classList.contains("open")) {
       clearTimeout(opening);
       opening = null;
@@ -159,7 +161,10 @@ function renderFilm() {
   if (!f) return;
   document.title = `${f.title} (${f.year}) • Reelbox`;
   document.getElementById("film").innerHTML = `<h1>${esc(f.title)}</h1>
-    <p class="meta">${f.year} · Directed by ${esc(f.director)}</p>
+    <p class="meta">${f.year} · Directed by ${esc(f.director)}${f.runtime ? ` · ${f.runtime} mins` : ""}</p>
+    ${f.synopsis ? `<p class="synopsis">${esc(f.synopsis)}</p>` : ""}
+    ${f.cast ? `<h2>Cast</h2><ul class="cast">${f.cast.map((c) => `<li><a href="#">${esc(c)}</a></li>`).join("")}</ul>` : ""}
+    ${f.genres ? `<h2>Genres</h2><p>${f.genres.map(esc).join(", ")}</p>` : ""}
     <p>Average rating <b>${f.rating.toFixed(1)}</b> out of 5</p>
     <button type="button" onclick="this.textContent='On your watchlist'">Add to watchlist</button>`;
 }

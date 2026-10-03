@@ -325,3 +325,18 @@ Format: decision, alternatives considered, why.
 
 **"Did the page react?" is measured by content added, not by the number of change events.**
 - Why: a page that draws results with one innerHTML assignment produces a single mutation; the first version missed it and reported that the Go button did nothing.
+
+**Quoted evidence confirms answers; it no longer blocks them.**
+- Why: in a live call the agent had the right answers ("Peter New" in a film's cast; rent $1,767 and total $2,080.50 from a lease table) and the checker threw them away nine times in a row: two-word quotes were below its minimum, and a PDF table puts labels and amounts far apart in the text. A quote now counts when its words are on the page (80% for up to six words, 90% beyond), amounts compare as whole numbers so "$1,950" can't pass for "$1,767.00", and if a quote still can't be confirmed after one retry the answer is spoken anyway and flagged on the dashboard. For people with little tech literacy a dead end ("I'm having trouble with this page") is worse than an unconfirmed but well-grounded answer from text the model has in full.
+
+**Every new request is its own task; only answers to Formline's question, or "try again / keep going / I logged in", continue the last one.**
+- Why: after a failed question, "I wanna check my profile" was treated as part of it and the agent kept answering the old question.
+
+**Screenshots of what the person sees go with questions, by default.**
+- Alternatives: text snapshot only (the earlier default); a screenshot on every model call.
+- Why: "if I can see it, it should be able to see it too." The text snapshot misses layout (tables), images and anything drawn on canvas. A screenshot on every call added ~3-5 s to the first turn of the booking flow, so it goes only with questions (what/who/how/explain..., or a "?"), after a failed step, and on near-empty pages. Screenshots can't be redacted, which PRIVACY.md and .env.example now say; FORMLINE_SCREENSHOTS=false turns them off.
+
+**Portal file names like "original" or "download" aren't read out as a document's title.**
+
+**A guard test fails if any source file contains a stray control character.**
+- Why: a shell heredoc turned `\b` into a literal backspace three times; once it silently broke the question detector, and an older one had been breaking part of the "Loading…" detector unnoticed.

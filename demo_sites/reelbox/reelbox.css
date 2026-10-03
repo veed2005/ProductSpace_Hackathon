@@ -10,7 +10,10 @@ nav a { color: #9ab; text-decoration: none; font-weight: 700; text-transform: up
   color: #fff; transition: width .3s ease, opacity .3s ease, padding .3s ease; }
 .nav-search.opening .search-field { width: 220px; padding: 7px 10px; }
 .nav-search.open .search-field { width: 220px; opacity: 1; visibility: visible; padding: 7px 10px; }
-.search-toggle { background: none; border: 0; color: #9ab; cursor: pointer; padding: 6px; }
+.nav-toggle { display: inline-block; width: 28px; height: 28px; }
+.nav-toggle .glyph { display: block; width: 18px; height: 18px; margin: 5px; border: 2px solid #9ab; border-radius: 50%; }
+.cast { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.cast a { display: inline-block; background: #2c3440; color: #ddd; padding: 3px 8px; border-radius: 3px; text-decoration: none; font-size: 13px; }
 .ac { position: absolute; top: 36px; left: 0; z-index: 5; list-style: none; margin: 0; padding: 4px 0; width: 260px;
   background: #fff; border-radius: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
 .ac a { display: block; padding: 6px 12px; color: #14181c; text-decoration: none; }
