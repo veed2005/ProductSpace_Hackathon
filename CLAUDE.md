@@ -17,6 +17,9 @@ A session-start hook (`scripts/lane.py session-start`) tells you which lane this
 - **Edit only files owned by the user's lane.** Check ownership with `python3 scripts/lane.py owner <path>`. If another lane's file needs a change, don't make it: tell the user what to ask that lane's owner for, and work against the existing stub meanwhile.
 - **Shared files** (`app/contracts.py`, `app/models.py`, `app/events.py`, `app/llm/client.py`, `app/config.py`, `app/main.py`, `pyproject.toml`): only small, additive changes, and tell the user to announce them to the team.
 - Cross-lane calls go only through the functions listed in `docs/TEAM.md`. `docs/PLAN.md` shows which phase delivers each dependency.
+- **Every phase in the lane plans is merged** (as of #24). Ask the user what to work on rather than restarting a phase.
+- **The call-the-internet code has no lane owner yet** (`app/agent/`, `app/browser/`, `extension/`, `demo_sites/` and their scripts and tests; `lane.py owner` says `unowned`). Ask the user before editing it until the team assigns it.
+- **New computer:** what git doesn't carry (`.env`, `data/`, ngrok's token, the extension) is listed under "Moving to another computer" in `docs/CALL_THE_INTERNET.md`.
 
 ## Product rules
 
