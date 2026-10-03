@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Formline Dashboard</title>
   <link rel="stylesheet" href="/dashboard/static/dashboard.css">
+  <link rel="stylesheet" href="/dashboard/static/agent.css">
 </head>
 <body>
   <header class="topbar">
@@ -16,7 +17,8 @@
       </div>
     </div>
     <nav class="nav" aria-label="Views">
-      <button class="nav-btn active" data-page="live">Live</button>
+      <button class="nav-btn active" data-page="agent">Agent</button>
+      <button class="nav-btn" data-page="live">Forms live</button>
       <button class="nav-btn" data-page="forms">Forms</button>
       <button class="nav-btn" data-page="metrics">Metrics</button>
     </nav>
@@ -30,7 +32,28 @@
     </div>
   </header>
 
-  <main class="layout" id="page-live">
+  <main class="agent-page" id="page-agent">
+    <section class="panel" aria-label="Browsers and tasks">
+      <h2 class="panel-title">Paired browsers</h2>
+      <ul id="agent-browsers" class="browser-list"></ul>
+      <h2 class="panel-title">Recent tasks</h2>
+      <ul id="agent-tasks" class="task-list scroll"></ul>
+    </section>
+    <section class="panel" aria-label="Browser task">
+      <div id="agent-task" class="scroll" style="display:flex;flex-direction:column;min-height:0;flex:1"></div>
+    </section>
+    <section class="panel" aria-label="Call">
+      <h2 class="panel-title">Call</h2>
+      <div id="agent-convo" class="agent-convo scroll" style="flex:1"></div>
+      <details id="agent-see">
+        <summary>What Formline sees on the page</summary>
+        <div id="agent-see-meta"></div>
+        <pre id="agent-see-body">Loading…</pre>
+      </details>
+    </section>
+  </main>
+
+  <main class="layout" id="page-live" hidden>
     <section class="panel people" aria-label="People">
       <h2 class="panel-title">People</h2>
       <ul id="people-list" class="people-list"></ul>
@@ -112,6 +135,7 @@
     <span class="chip src-pending">Not yet asked</span>
   </footer>
 
+  <script src="/dashboard/static/agent.js"></script>
   <script src="/dashboard/static/dashboard.js"></script>
 </body>
 </html>

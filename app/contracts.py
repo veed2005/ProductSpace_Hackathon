@@ -6,6 +6,7 @@ additive (new optional fields), and never rename or remove a field without agree
 See docs/TEAM.md.
 """
 
+import datetime
 from datetime import date
 from typing import Any, Literal, Optional
 
@@ -81,7 +82,8 @@ class FormMeta(BaseModel):
 # ---------------------------------------------------------------- documents
 
 class Deadline(BaseModel):
-    date: Optional[date] = None
+    # datetime.date, not date: a field named `date` would shadow the type and make it always None.
+    date: Optional[datetime.date] = None
     description: str  # what the deadline is for
 
 

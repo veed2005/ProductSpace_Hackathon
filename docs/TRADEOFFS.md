@@ -230,3 +230,113 @@ Format: decision, alternatives considered, why.
 
 **When the laptop or ngrok is down, Twilio's fallback URL points at a Twilio-hosted TwiML Bin.**
 - Why: our own fallback (`/twilio/voice/status`) can't help if our server is unreachable. A TwiML Bin lives on Twilio, so callers still hear "Formline is offline, try again in a few minutes" instead of Twilio's generic error.
+
+## Pivot: call the internet
+
+**Formline operates the person's own browser through a Chrome extension, instead of filling a fixed set of PDFs.**
+- Alternatives: keep the form-schema product; a server-side headless browser that logs in for the person.
+- Why: the extension acts in the browser where the person is already signed in, so Formline never sees passwords or cookies, works on any site, and the person watches it happen. The form/PDF assistant stays as-is for callers without a paired browser.
+
+**The model sees a semantic text snapshot of the page, not screenshots or HTML.**
+- Alternatives: screenshots + vision (click by coordinates); raw HTML.
+- Why: a snapshot of controls with accessible names is small (fast and cheap per decision), works with any language model, and lets the extension redact secrets before anything leaves the browser. Screenshots can't be redacted, so they're an opt-in fallback for nearly empty pages only (`FORMLINE_VISION_FALLBACK`).
+
+**Actions name temporary element ids from the snapshot; the model never writes JavaScript or selectors.**
+- Why: a fixed vocabulary (click, type, select, check, …) is checkable. Ids carry a per-document `doc_id`, so an id from a previous page is refused rather than hitting a different element that happens to share it.
+
+**Consequential steps are gated three ways: the model's `confirm`, a deterministic backstop, and a server-stored pending action with a page fingerprint.**
+- Alternatives: trust the model to ask; a fixed list of selectors per site.
+- Why: models forget to ask. The backstop catches final verbs (book, send, pay, delete, cancel <thing>) and any button on a review page, while letting "Schedule an appointment" (which starts a flow) through. The fingerprint covers page text too, so a "yes" given to one summary can't book a different one; a site with live-updating text just gets asked again.
+
+**Success is only reported with quoted evidence found on a fresh snapshot, and only after a confirmed final step actually ran.**
+- Why: "the model asked to click Book" is not "the appointment is booked". Matching ignores case, punctuation, and snapshot markup, so a quote spanning a heading and the line below it counts.
+
+**The agent loop runs in the background of the call, with an inbox for speech that arrives mid-task.**
+- Why: "stop" must work while the agent is mid-step. A reply to a question the agent just asked is treated as the answer, not as mid-task chatter.
+
+**Agent model: gpt-5.4-mini (low reasoning) when using OpenAI.**
+- Alternatives: gpt-4.1-mini, gpt-4.1, gpt-5-mini.
+- Why: measured on the recorded prompts that failed (scripts/agent_bench.py): gpt-5.4-mini chose correctly every time at ~0.8–1 s; gpt-4.1-mini asked ahead and mangled ids, gpt-4.1 used the wrong action for a radio button, gpt-5-mini was 2–7 s. OpenAI support was added to `llm.client` because this machine had only an OpenAI key; the provider is picked by which key is set, so Anthropic users see no change.
+
+**Pairing proves the phone with a code sent by text or by voice call, then issues a random browser token (stored hashed). The PIN is still required on each call.**
+- Why: landlines can't receive texts but can answer a call. Caller ID only identifies the browser; it can be spoofed, so the PIN authorizes control (reusing the existing 30-minute verification and 3-strike lockout).
+
+**The agent waits out loading indicators before deciding.**
+- Why: in the first live run the model saw a "Loading…" placeholder and gave up. Waiting on `aria-busy`, loading text, and disabled "…ing…" buttons (up to ~6 s) is generic and fixed it.
+
+**Texts from a paired phone drive the browser too, with replies sent as separate texts.**
+- Why: deaf and hard-of-hearing callers, and the demo's text-only backup. Browser work can outlast Twilio's webhook timeout, so replies go out by REST, not in the webhook response.
+
+**End-to-end tests drive Playwright's Chromium with a model playing the caller.**
+- Alternatives: keyword-matched caller replies; Chrome stable.
+- Why: Chrome 137+ ignores `--load-extension`, so automated runs use Chromium. Keyword replies broke whenever the agent phrased a question differently; a persona-driven caller answers like a person would, and the run passes only if the site's own state shows the goal was done.
+
+**Browser tables (pairing, installations, tasks, actions) have no foreign keys to Profile.**
+- Why: same reason as PinGuard: existing databases pick up new tables without a reset, and "forget me" deletes these rows itself.
+
+**PDFs are read whole: the extension downloads the file from the tab and the server extracts every page.**
+- Alternatives: read Chrome's PDF viewer like a page (it's opaque to snapshots); screenshots of the visible page; have the server fetch the URL.
+- Why: in a live call the agent saw nothing of a lease and couldn't answer. Fetching from the page itself carries the person's session (PDFs behind a login work) without the server ever seeing cookies, and text extraction gives every page, not just the visible one. Scanned PDFs (no text layer) fall back to pictures of their first 8 pages. The document goes first in the prompt so follow-up questions reuse the provider's prompt cache (answers took about 1 s).
+
+**A new decision kind, `answer`, for questions about the page or document, with quoted evidence.**
+- Alternatives: reuse `done` (ends the task); answer without evidence.
+- Why: questions come in a series ("can I have a dog?", "how do I get out early?"), so the conversation must stay open. Requiring a quote that code finds in the page keeps answers grounded in the person's own document. A summary may stitch several quotes; every piece of 3+ words must be real.
+
+**The agent can no longer type web addresses (`navigate` removed from its vocabulary).**
+- Why: in a live call, "look up a movie" jumped straight to the previous request's film by URL: nothing visible happened and nothing was searched. Using the site's own search and links is what the person expects to see. Requests for the person's own things (appointments, loans, orders) go to the account area instead of search, which kept the library flow at 4 steps.
+
+**A new request starts with a note not to reuse details from earlier requests.**
+- Why: the conversation is kept for context ("that one", "the other time"), but a vague new request ("look up a movie") must be clarified, not filled in from an old one.
+
+**Evidence is checked against exactly the text the model was shown.**
+- Why: the model quoted the page title as it appears in the snapshot ("Title: …", with an invisible direction mark) and was rejected three times on a page that did prove success.
+
+**Icon-only buttons get a guessed name from class names, ids and icon references, marked "(icon)".**
+- Why: a magnifying-glass button with no text or label was invisible to the model, so it couldn't open a hidden search box.
+
+**Site names skip bot-check titles and prefer the part of the title that matches the address.**
+- Why: a Cloudflare check made the greeting say "I can see you have Just a moment... open".
+
+**PDFs are copied when the tab opens, because Chrome's viewer can't be read and portal links expire.**
+- Alternatives tried (all measured in Chromium): re-downloading on demand (an AppFolio/S3 link returned 403 minutes later); Chrome's HTTP cache (works only when the file has no Cache-Control; no-cache and no-store, which portals use, get 403); the viewer's select-all/get-text commands (its embed is in a closed shadow root and its frames belong to another extension, so they can't be reached); printing the tab through the DevTools protocol (prints the toolbar, one page); jumping pages with #page=N for screenshots (the viewer ignored it).
+- Why: a copy fetched in the first second, while the link is fresh, makes every later question work. It stays in that tab's memory and leaves the browser only when the person asks about the document. Without a copy (a PDF opened before the extension loaded), the visible part is captured and the agent says that's all it can see.
+
+**The agent follows the person when they switch tabs.**
+- Why: in a live call the person moved from a PDF to Letterboxd and asked "can you see Letterboxd?"; the agent was pinned to the PDF tab. The extension already reports the active tab (excluding Formline's own dashboard), so that is the page.
+
+**Names for controls with no text come from tooltip attributes, a neighbouring image, or the link's address; "icon" guesses only for small elements.**
+- Why: Letterboxd's film posters are text-less links with a `has-menu` class next to an image; the agent saw "menu (icon)" and clicked a film thinking it was a menu. Poster tooltips (`data-original-title`) and `/film/the-ritual-2017/` say what they are.
+
+**Search boxes are recognised by name, id, class, placeholder or form, and a hidden one is mentioned.**
+- Why: many sites use a plain text input named `q`, often hidden until a magnifying glass is clicked. The agent clicked "More..." seven times looking for one.
+
+**The same click on an unchanged page is refused the third time.**
+- Why: that "More..." loop. "Unchanged" means the same address and headings, so a wizard's "Next" on each new step is never refused (the first version of this guard keyed on the label alone and broke the booking flow).
+
+**Searching a site is one `search` action carried out by the extension, not a series of model clicks.**
+- Alternatives: better prompts for click/type/press_enter; the DevTools protocol for real keystrokes.
+- Why: in a live Letterboxd call the model opened the header search, didn't see it open in time, clicked the icon again (closing it), used the profile-only search, wandered into the "log a film" dialog, and pressed Enter twice in a box that only takes clicked suggestions. A test site rebuilt to behave the same way reproduced it 0/3; after the change 3/3 in one step. The routine encodes what a careful person does: pick the site's main search box (scored by header/search-form/name=q, penalised for "Linky's reviews", "filter", dialogs), click the opener once and wait until the box has finished opening, type key by key, wait up to 1.5 s for suggestions, then submit by Enter, by the form, or by the search/Go button, and say which. The model still decides what to search for and which result to open. Real keystrokes through the DevTools protocol would show a "debugging this browser" bar; key-by-key synthetic events were enough for the patterns tested.
+
+**Each look at the page marks what's new since the last look (+) and counts what disappeared.**
+- Why: the agent couldn't tell its click had opened something, so it repeated it. Ids are stable within a document, so "new" is exact for controls; text is compared by content. A whole new page is said plainly instead of marking everything.
+
+**A text box counts as visible only if it's really open: not transparent, not collapsed to zero width.**
+- Why: a collapsed search field was "visible" to CSS checks; the agent typed into an invisible box. Now the snapshot leaves it out and says a hidden search box exists.
+
+**"Did the page react?" is measured by content added, not by the number of change events.**
+- Why: a page that draws results with one innerHTML assignment produces a single mutation; the first version missed it and reported that the Go button did nothing.
+
+**Quoted evidence confirms answers; it no longer blocks them.**
+- Why: in a live call the agent had the right answers ("Peter New" in a film's cast; rent $1,767 and total $2,080.50 from a lease table) and the checker threw them away nine times in a row: two-word quotes were below its minimum, and a PDF table puts labels and amounts far apart in the text. A quote now counts when its words are on the page (80% for up to six words, 90% beyond), amounts compare as whole numbers so "$1,950" can't pass for "$1,767.00", and if a quote still can't be confirmed after one retry the answer is spoken anyway and flagged on the dashboard. For people with little tech literacy a dead end ("I'm having trouble with this page") is worse than an unconfirmed but well-grounded answer from text the model has in full.
+
+**Every new request is its own task; only answers to Formline's question, or "try again / keep going / I logged in", continue the last one.**
+- Why: after a failed question, "I wanna check my profile" was treated as part of it and the agent kept answering the old question.
+
+**Screenshots of what the person sees go with questions, by default.**
+- Alternatives: text snapshot only (the earlier default); a screenshot on every model call.
+- Why: "if I can see it, it should be able to see it too." The text snapshot misses layout (tables), images and anything drawn on canvas. A screenshot on every call added ~3-5 s to the first turn of the booking flow, so it goes only with questions (what/who/how/explain..., or a "?"), after a failed step, and on near-empty pages. Screenshots can't be redacted, which PRIVACY.md and .env.example now say; FORMLINE_SCREENSHOTS=false turns them off.
+
+**Portal file names like "original" or "download" aren't read out as a document's title.**
+
+**A guard test fails if any source file contains a stray control character.**
+- Why: a shell heredoc turned `\b` into a literal backspace three times; once it silently broke the question detector, and an older one had been breaking part of the "Loading…" detector unnoticed.

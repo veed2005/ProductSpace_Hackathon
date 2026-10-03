@@ -17,6 +17,23 @@ class Settings(BaseSettings):
     # model if "Add a new form" is too slow for the stage demo.
     ingest_model: str = Field("", alias="FORMLINE_INGEST_MODEL")
 
+    # OpenAI is used when it's the only key set, or when FORMLINE_LLM_PROVIDER=openai.
+    openai_api_key: str = ""
+    llm_provider: str = Field("", alias="FORMLINE_LLM_PROVIDER")  # "", "anthropic", or "openai"
+    openai_fast_model: str = Field("gpt-4.1-mini", alias="FORMLINE_OPENAI_FAST_MODEL")
+    openai_strong_model: str = Field("gpt-4.1", alias="FORMLINE_OPENAI_STRONG_MODEL")
+    # Model for browser-agent decisions. Empty: gpt-5.4-mini on OpenAI (most accurate at the same latency in
+    # scripts/agent_bench.py), the fast model on Anthropic.
+    agent_model: str = Field("", alias="FORMLINE_AGENT_MODEL")
+    # Reasoning effort for OpenAI reasoning models (gpt-5.x, o-series): none | minimal | low | medium.
+    openai_reasoning: str = Field("low", alias="FORMLINE_OPENAI_REASONING")
+    # Send a screenshot to the model when a page's text snapshot is nearly empty (canvas apps, image-only
+    # pages). Off by default: a screenshot skips the in-browser redaction of secrets.
+    vision_fallback: bool = Field(False, alias="FORMLINE_VISION_FALLBACK")
+    # A screenshot of what the person sees goes with the agent's first look after they speak, so it can explain
+    # what's on their screen. Screenshots can't be redacted the way page text is; false turns them off.
+    screenshots: bool = Field(True, alias="FORMLINE_SCREENSHOTS")
+
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""

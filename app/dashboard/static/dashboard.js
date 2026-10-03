@@ -499,11 +499,13 @@ $("letter").addEventListener("click", (e) => {
 function setPage(page) {
   state.page = page;
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+  $("page-agent").hidden = page !== "agent";
   $("page-live").hidden = page !== "live";
   $("page-forms").hidden = page !== "forms";
   $("page-metrics").hidden = page !== "metrics";
   document.querySelector(".legend").hidden = page !== "live";
   document.querySelector(".follow").hidden = page !== "live";
+  if (page === "agent") window.FormlineAgent.show();
   if (page === "forms") loadForms();
   if (page === "metrics") loadMetrics();
 }
@@ -801,6 +803,7 @@ function connect() {
     const ev = JSON.parse(e.data);
     switch (ev.type) {
       case "message":
+        window.FormlineAgent.refresh();
         if (state.follow && ev.phone && ev.phone !== state.phone) {
           state.phone = null;  // loadPeople will select the live phone
           refresh({ people: true });
@@ -821,6 +824,10 @@ function connect() {
       case "activity":
         refresh({ people: true, profile: true });
         break;
+      case "agent":
+      case "browser":
+        window.FormlineAgent.refresh();
+        break;
       default:
         refresh({ people: true });
     }
@@ -834,3 +841,4 @@ setInterval(() => {
 setInterval(renderPeople, 30000);  // keep "x min ago" current
 connect();
 loadPeople().catch(console.warn);
+setPage("agent");

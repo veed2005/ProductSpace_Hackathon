@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from app.config import get_settings
 from app.llm import client as llm
 
 Intent = Literal["fill_form", "explain_document", "status", "forget_me", "help"]
@@ -26,7 +25,7 @@ def classify_intent(text: str, *, has_media: bool = False) -> Intent:
     if any(w in t for w in ("form", "apply", "application", "renew", "snap", "medicaid", "food stamps")):
         return "fill_form"
 
-    if get_settings().anthropic_api_key:
+    if llm.available():
         try:
             result = llm.structured(
                 IntentClassification,

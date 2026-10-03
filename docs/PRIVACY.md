@@ -92,3 +92,15 @@ To be finalized with legal review (production item 3). Short enough to speak on 
 > **English:** "Formline helps you fill out forms and understand letters. We'll save what you tell us so next time is faster, and protect it with a 4-digit PIN you choose. We don't send anything to the government. A helper organization reviews your forms. Say 'forget me' any time to delete your information. Is that OK?"
 >
 > **Español:** "Formline le ayuda a llenar formularios y entender cartas. Guardaremos lo que nos diga para que la próxima vez sea más rápido, protegido con un PIN de 4 dígitos que usted elige. No enviamos nada al gobierno. Una organización de ayuda revisa sus formularios. Diga 'olvídame' cuando quiera para borrar su información. ¿Está bien?"
+
+## The browser agent ("call the internet")
+
+**Built.** The Chrome extension can see whatever page the person has open, so it sends as little as possible:
+
+- **What leaves the browser:** a text snapshot of the current tab: control names and states, headings, short text. Password fields, hidden inputs, and fields that look like card numbers, SSNs, PINs or one-time codes are listed without their values; SSN- and card-shaped numbers are masked in all text; query strings are removed from addresses. Cookies, storage, and passwords are never read. The server scrubs every snapshot a second time.
+- **What Formline stores:** each browser task's goal, status, and action log (which button, what was typed into which field; values typed into secret fields are refused, never stored), plus the paired browser (a hashed token, a label like "Chrome on Windows"). "Forget me" deletes all of it.
+- **Screenshots:** when the person asks a question (and after a failed step, or on a page with almost no text), a picture of the visible tab goes to the model so it can answer from what they see. A picture can't be redacted the way page text is, so anything visible is in it; `FORMLINE_SCREENSHOTS=false` turns this off. Screenshots are not stored.
+- **Who can drive the browser:** only a caller from the paired number who also enters the PIN (or did within 30 minutes). Caller ID alone is never enough.
+- **Debug trace:** `FORMLINE_AGENT_TRACE` writes prompts (page text and what the caller said) to a local file. Only for development; never on a shared machine.
+
+**Production would need:** consent text in the extension that names what is read, per-site allow lists chosen by the person, retention limits for task logs, and an audit view for the person themselves.

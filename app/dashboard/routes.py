@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from app import events
 from app.config import get_settings
-from app.dashboard import api, control_api, forms_api
+from app.dashboard import agent_api, api, control_api, forms_api
 
 STATIC_DIR = Path(__file__).parent / "static"
 _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost", "testclient"}  # testclient: Starlette's TestClient
@@ -39,6 +39,7 @@ router = APIRouter(dependencies=[Depends(local_only)])
 router.include_router(api.router)
 router.include_router(forms_api.router)
 router.include_router(control_api.router)
+router.include_router(agent_api.router)
 
 FAVICON = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" '
            'fill="#1d4ed8"/><text x="32" y="45" font-family="system-ui,Arial" font-size="38" font-weight="800" '
