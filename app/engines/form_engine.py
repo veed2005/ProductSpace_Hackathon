@@ -26,6 +26,12 @@ class _NormalizedMoney(BaseModel):
     varies: bool = False
 
 
+def reply_key(text: str | None) -> str:
+    """A short reply ready for matching: lowercase, single spaces, outer punctuation removed.
+    Voice transcripts arrive as "Sí." or "Yes!", so exact comparisons must use this."""
+    return " ".join((text or "").casefold().split()).strip(" .,!?¡¿;:'\"")
+
+
 def _matches_condition(field: FormField, answers: dict[str, Any]) -> bool:
     if field.condition is None:
         return True
@@ -38,7 +44,7 @@ def _matches_condition(field: FormField, answers: dict[str, Any]) -> bool:
 
 
 def _coerce_yes_no(raw: str) -> str:
-    text = raw.strip().lower()
+    text = reply_key(raw)
     if text in {"yes", "y", "true", "1", "sure", "ok", "okay", "sí", "si", "claro"}:
         return "yes"
     if text in {"no", "n", "false", "0", "nope"}:
@@ -121,7 +127,7 @@ def _next_field(task: Task, schema: FormSchema) -> FormField | None:
 def _answer_from_user(task: Task, field: FormField, raw_text: str) -> tuple[dict[str, Any], str]:
     text = raw_text.strip()
     try:
-        if text.casefold() in {"skip", "i don't know", "idk", "unknown", "pass", "no sé", "no se", "paso"}:
+        if reply_key(text) in {"skip", "i don't know", "idk", "unknown", "pass", "no sé", "no se", "paso"}:
             if field.required:
                 return {"value": None, "source": "unknown"}, "unknown"
             return {"value": None, "source": "skipped"}, "skipped"
@@ -345,8 +351,8 @@ def process_readback(task_id: int, text: str) -> tuple[Task, str]:
         if task is None or task.status != "readback":
             raise ValueError("task is not awaiting read-back")
         schema = form_library.load_schema(task.form_id)
-        normalized = text.strip()
-        lowered = normalized.casefold()
+        normalized = text.strip().rstrip(" .!?")
+        lowered = reply_key(normalized)
         if lowered in {"yes", "y", "correct", "that's right", "looks right", "sí", "si", "correcto"}:
             _verify_and_finish(task, schema)
             s.add(task)
