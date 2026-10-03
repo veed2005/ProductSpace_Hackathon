@@ -1,29 +1,38 @@
 """Dashboard pages and live event stream. Owner: Lane D.
 
-GET /dashboard         the page (projector-friendly, Phase 8)
-GET /dashboard/events  Server-Sent Events stream of app.events.publish() payloads
+GET /dashboard                 the page (static/index.html)
+GET /dashboard/static/{file}   its CSS and JS
+GET /dashboard/events          Server-Sent Events stream of app.events.publish() payloads
+/api/...                       JSON API (app/dashboard/api.py)
 """
 
 import asyncio
 import json
+from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app import events
+from app.dashboard import api
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 router = APIRouter()
+router.include_router(api.router)
 
 
-@router.get("/dashboard", response_class=HTMLResponse)
-def dashboard() -> str:
-    # TODO(Lane D, Phase 8): real dashboard. This page just prints live events.
-    return """<!doctype html><meta charset="utf-8"><title>Formline</title>
-<h1>Formline dashboard</h1><p>Live events:</p><pre id="log"></pre>
-<script>
-const es = new EventSource('/dashboard/events');
-es.onmessage = e => { document.getElementById('log').textContent = e.data + '\\n' + document.getElementById('log').textContent; };
-</script>"""
+@router.get("/dashboard", include_in_schema=False)
+def dashboard() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/dashboard/static/{name}", include_in_schema=False)
+def static(name: str) -> FileResponse:
+    path = (STATIC_DIR / name).resolve()
+    if path.parent != STATIC_DIR.resolve() or not path.is_file():
+        raise HTTPException(404)
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 @router.get("/dashboard/events")

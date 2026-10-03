@@ -72,6 +72,8 @@ docs/          TRADEOFFS.md, PRIVACY.md, DEMO_SCRIPT.md
 
 - [x] Phase 0: setup, models, FastAPI skeleton
 - [x] Team scaffolding: lane contracts and working stubs, sample form, simulator, CI
+- [x] D1: canonical profile keys, demo seed/reset
+- [x] D2: live dashboard v1 (people, transcript, fields by source, verification, PDF download)
 - [ ] Phase 1: brain + CLI simulator
 - [ ] Phase 2: SMS/MMS
 - [ ] Phase 3: document engine
