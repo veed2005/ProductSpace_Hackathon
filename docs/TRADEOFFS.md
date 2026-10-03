@@ -86,6 +86,19 @@ Format: decision, alternatives considered, why.
 **Transcript hides a 4-digit reply only when Formline's previous message asked for a PIN or SSN digits.**
 - Why: the first version hid every bare 4-digit reply, which also hid income answers like "1450" during testing.
 
+**PDF fill: checkbox and radio values map to the widget's real on-state; unrecognized values are left unset.**
+- Alternatives: write the schema's `pdf_values` string as-is; treat any non-empty value as "checked".
+- Why: real forms use "On", "1", "Y" or custom names instead of "Yes", and writing the wrong name leaves the box blank in most viewers. Mapping yes/true/on/x and the on-state itself covers schemas written without opening the PDF. A value like "sometimes" isn't guessed: it stays unchecked and `verify_pdf` reports a mismatch, so the brain re-asks instead of shipping a wrong box.
+
+**PDF fill strips the XFA layer and sets NeedAppearances.**
+- Why: many government PDFs are XFA hybrids, and Acrobat shows the (empty) XFA data instead of the AcroForm values we wrote. Regenerated appearances plus NeedAppearances make values show in Preview, Chrome and Acrobat. The cost is that XFA-only scripting (dynamic sections, calculations) no longer runs, which we don't use.
+
+**Truncation is measured, not guessed: base-14 font widths against the widget rect.**
+- Alternatives: rely on `max_length` only; render and OCR the result.
+- Why: most boxes have no MaxLen, and long names and addresses are the realistic failure. Unknown embedded fonts are measured as Helvetica, which can be off by a few percent; auto-size fields count as truncated only when the text would shrink below 6pt. Multiline uses greedy word wrap at 1.15 line height.
+
+**Required-field check skips checkboxes and conditional fields whose condition can't be read from the PDF.**
+- Why: unchecked means "no", which is a valid answer; and flagging a conditional field we can't evaluate would block completion on a false alarm. A caller that wants strict checks can pass an explicit list of pdf fields instead of the schema.
 **The demo uses a live new user (Rosa) whose memory is built on stage, with the seeded Maria only as a fallback.**
 - Alternatives: demo memory reuse with a pre-seeded returning user.
 - Why: judges see the profile being built in step 1 and reused in step 4, so the "x% faster" number is measured live, not staged. Maria stays seeded in case memory reuse fails.
