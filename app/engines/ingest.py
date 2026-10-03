@@ -193,24 +193,44 @@ def prepare(pdf_path: Path) -> Prepared:
                     button_labels=button_labels, seconds=time.monotonic() - start, handles=handles)
 
 
+_ANSWER_WORD = re.compile(r"^(yes|no|s[ií])\W*$", re.IGNORECASE)
+
+
 def _read_pages(doc: fitz.Document) -> tuple[dict[int, list], dict[str, str], dict[int, str]]:
-    """One pass over the pages: words per page, tooltip per field name, and for each checkbox or
-    radio button the words printed just right of it ("Yes", "No")."""
+    """One pass over the pages: words per page, tooltip per field name, and each checkbox or
+    radio button's printed label ("Yes", "No").
+
+    Forms print option labels on either side: "[ ] Yes [ ] No" or "Yes [ ] No [ ]". If the word
+    just left of a group's leftmost button is an answer word, labels sit left of their buttons;
+    otherwise right. (Reading only the right side maps "Yes [ ] No [ ]" backwards.)
+    """
     words: dict[int, list] = {}
     tips: dict[str, str] = {}
     button_labels: dict[int, str] = {}
     for page in doc:
         words[page.number] = page_words = page.get_text("words")
+        groups: dict[str, list[tuple[float, int, str, str]]] = {}
         for w in page.widgets():
             if w.field_label and w.field_name not in tips:
                 tips[w.field_name] = w.field_label
             if w.field_type not in (fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
                 continue
             r, mid = w.rect, (w.rect.y0 + w.rect.y1) / 2
-            right = sorted((x for x in page_words if abs((x[1] + x[3]) / 2 - mid) < 5 and r.x1 - 2 <= x[0] < r.x1 + 45),
-                           key=lambda x: x[0])
-            if right:
-                button_labels[w.xref] = " ".join(x[4] for x in right[:3])
+            line = [x for x in page_words if abs((x[1] + x[3]) / 2 - mid) < 5]
+            right = sorted((x for x in line if r.x1 - 2 <= x[0] < r.x1 + 45), key=lambda x: x[0])
+            left = sorted((x for x in line if r.x0 - 45 < x[2] <= r.x0 + 2), key=lambda x: x[0])
+            groups.setdefault(w.field_name, []).append((
+                r.x0, w.xref, " ".join(x[4] for x in left[-3:]), " ".join(x[4] for x in right[:3])))
+        for buttons in groups.values():
+            buttons.sort()
+            first_left = buttons[0][2].split()[-1:] if buttons[0][2] else []
+            labels_left = len(buttons) > 1 and bool(first_left) and bool(_ANSWER_WORD.match(first_left[0]))
+            for _, xref, left, right in buttons:
+                label = (left.split()[-1] if left else "") if labels_left else right
+                if label and _ANSWER_WORD.match(label.split()[0]):
+                    label = label.split()[0]  # "Yes No" -> "Yes": the next option's label isn't ours
+                if label:
+                    button_labels[xref] = label
     return words, tips, button_labels
 
 

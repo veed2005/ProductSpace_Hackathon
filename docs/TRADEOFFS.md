@@ -161,3 +161,16 @@ Format: decision, alternatives considered, why.
 - A second model call happens only when repairing the draft would drop more than a quarter of its questions; otherwise the instant repair wins, since a retry doubles the wait on stage.
 - `FORMLINE_INGEST_MODEL` (shared config, additive) picks a faster model for drafting without touching the strong model used for letters. Default stays the strong model until someone times both.
 - Not done: vision-based filling of flat (non-fillable) PDFs, the C5 stretch goal. Flat, XFA-only and password-protected PDFs get a specific error instead.
+
+**Demo rehearsal fills all three forms for the seeded persona, from memory, in the test suite.**
+- Why: it's the on-stage path end to end (Lane D's seed -> memory -> schema `profile_key` -> PDF -> verify) and it caught a real bug: the seeded SNAP case number `IL-SNAP-448120` is 14 characters, but the school meals box holds 9, so it would print cut off. The seed now uses `448120917`, and the schema validates the case number (up to 9 letters or digits) so a longer one is re-asked. `FORMLINE_KEEP_DEMO_PDFS=1` keeps the filled PDFs in `data/demo/filled/` for eyeballing.
+
+**`app/pdf/format.py`: `pdf_value(field, answer)` turns stored values into what paper forms expect.**
+- Why: memory stores ISO dates and E.164 phones, so the Medicaid PDF showed `+12025550101` and dates as `1988-03-14`. US forms want `(202) 555-0101` and `03/14/1988`, money without "$", and the form's own checkbox states. Lane A's completion step can call it per field.
+
+**Option labels are read from whichever side the form prints them.**
+- Why: the SNAP and Medicaid forms print "[ ] Yes [ ] No"; the SNAP renewal prints "Yes [ ] No [ ]". Reading only the word right of a button mapped the second layout backwards. If the word just left of a group's leftmost button is Yes/No/Sí, labels are on the left.
+
+**The finale form is the 3-page IDHS SNAP Redetermination (IL444-1893), kept in `forms/_new_form_demo/` without a meta.json.**
+- Alternatives: a county LIHEAP application (12 pages, a scanned page with boxes laid over it).
+- Why: it's clean, short (about a 3k-token prompt), Illinois, and overlaps the SNAP application, so the newly added form fills mostly from memory on stage. Without meta.json the library ignores it until it's uploaded.
