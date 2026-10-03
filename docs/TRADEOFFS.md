@@ -202,3 +202,13 @@ Format: decision, alternatives considered, why.
 
 **Voice: keypad digits are buffered and sent as one turn on `#`, at 4 digits, or after a 2-second pause.**
 - Why: a PIN typed on the keypad arrives as four separate `dtmf` messages; the brain should see "1234", and a single "1" for a menu choice still goes through after the pause.
+
+**Reminders: an in-process APScheduler job checks every minute; sending first claims the row (`pending` → `sending`).**
+- Alternatives: a separate worker process; Twilio's own scheduled messages.
+- Why: one process is simplest for a demo laptop, and a minute's precision is plenty for deadline reminders. The atomic claim means the scheduler and the dashboard's "Send now" can never text the same reminder twice. The first check runs a minute after startup, which also keeps the job from firing inside short-lived test apps.
+
+**A reminder that fails to send is marked `failed`, not retried.**
+- Why: if Twilio rejects a number (opted out, unregistered sender), retrying every minute would hammer it. The failure is logged as activity so a partner sees it, and "Send now" can't resend it by accident.
+
+**Reminder texts are scrubbed of anything shaped like a full SSN, both when saved and when sent.**
+- Why: reminder wording can come from a letter the person photographed. Case numbers and dates stay, since the person needs them.
