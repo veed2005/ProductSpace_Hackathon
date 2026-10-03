@@ -40,10 +40,16 @@
       </div>
     </section>
 
-    <section class="panel form" aria-label="Form">
+    <section class="panel form" aria-label="Form and memory">
+      <div class="tabs" role="tablist">
+        <button class="tab active" role="tab" data-view="form" aria-selected="true">Form</button>
+        <button class="tab" role="tab" data-view="memory" aria-selected="false">Memory</button>
+        <div class="profile-switch" id="profile-switch"></div>
+      </div>
       <div id="task">
         <p class="empty">No form in progress.</p>
       </div>
+      <div id="memory" hidden></div>
     </section>
   </main>
 

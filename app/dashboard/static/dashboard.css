@@ -165,6 +165,38 @@ body {
 .chip.src-pending { color: var(--ink-3); background: #fff; border-style: dashed; }
 .chip.asking { color: var(--asked); background: #fff; }
 
+/* ---------- tabs ---------- */
+.tabs { display: flex; align-items: center; gap: 6px; margin: -4px 0 14px; border-bottom: 1px solid var(--line); }
+.tab {
+  font: inherit; font-size: 16px; font-weight: 700; color: var(--ink-3); background: none; border: 0;
+  padding: 8px 14px 10px; border-bottom: 3px solid transparent; margin-bottom: -1px; cursor: pointer;
+}
+.tab.active { color: var(--ink); border-bottom-color: var(--brand); }
+.profile-switch { margin-left: auto; display: flex; gap: 6px; }
+.pill { font: inherit; font-size: 14px; font-weight: 600; border: 1.5px solid var(--line); background: #fff; border-radius: 999px; padding: 3px 12px; cursor: pointer; color: var(--ink-2); }
+.pill.active { border-color: var(--brand); color: var(--brand); background: #eef3fe; }
+.form #memory { overflow-y: auto; min-height: 0; }
+
+/* ---------- memory view ---------- */
+.mem-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+.mem-name { margin: 0; font-size: 26px; line-height: 1.15; }
+.mem-sub { font-size: 15px; color: var(--ink-3); display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.facts { display: grid; gap: 6px; }
+.fact {
+  display: grid; grid-template-columns: minmax(120px, 30%) 1fr auto; gap: 12px; align-items: center;
+  padding: 10px 12px; border-radius: 10px; background: #faf9f6; border-left: 5px solid var(--memory);
+}
+.fact.stale { border-left-color: var(--corrected); background: #fff8ee; }
+.fact-label { font-size: 16px; color: var(--ink-2); }
+.fact-value { font-size: 19px; font-weight: 650; overflow-wrap: anywhere; }
+.fact-meta { display: grid; justify-items: end; gap: 4px; font-size: 13px; color: var(--ink-3); text-align: right; }
+.badge { font-size: 13px; font-weight: 700; border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.badge.fresh { color: var(--memory); background: var(--memory-bg); }
+.badge.stale { color: var(--corrected); background: var(--corrected-bg); }
+.side-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 16px; }
+.side-list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; background: #faf9f6; border-radius: 10px; }
+.side-list time { color: var(--ink-3); font-size: 14px; white-space: nowrap; }
+
 /* ---------- legend ---------- */
 .legend { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; padding: 0 24px 16px; }
 
@@ -180,6 +212,7 @@ body {
   body { font-size: 16px; }
   .topbar, .layout { padding-left: 16px; padding-right: 16px; }
   .field { grid-template-columns: 1fr auto; }
-  .field-label { grid-column: 1 / -1; }
+  .field-label, .fact-label { grid-column: 1 / -1; }
+  .fact { grid-template-columns: 1fr auto; }
   .brand-sub, .follow span { display: none; }
 }

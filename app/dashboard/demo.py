@@ -99,9 +99,17 @@ def _seed_maria(phone: str) -> int:
     # One completed form 45 days ago: the "first form" baseline for the memory metric.
     started, finished = _ago(45), _ago(45) + timedelta(minutes=11)
     with session_scope() as s:
+        at = finished.isoformat()
+        answers = {fid: {"value": v, "source": "asked", "updated_at": at} for fid, v in {
+            "applicant_name": {"first": "Maria", "middle": "Elena", "last": "Garcia"},
+            "date_of_birth": "1988-03-14",
+            "address": {"street": "412 Elm St", "apt": "2B", "city": "Springfield", "state": "IL", "zip": "62704"},
+            "household_size": 3, "employed": "yes", "employer": "Sunrise Diner", "monthly_income": 1300,
+        }.items()}
+        answers["ssn_last4"] = {"value": None, "source": "skipped", "updated_at": at}
         task = Task(profile_id=pid, kind="fill_form", form_id="sample_benefits", status="completed",
                     turn_count=24, started_channel="sms", started_at=started, completed_at=finished,
-                    verification={"ok": True, "fields_checked": 8}, answers={})
+                    verification={"ok": True, "fields_checked": 7}, answers=answers)
         s.add(task)
         s.commit()
         s.refresh(task)
