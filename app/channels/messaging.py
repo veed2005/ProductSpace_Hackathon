@@ -178,6 +178,15 @@ async def inbound_message(request: Request, background: BackgroundTasks) -> Resp
         return twiml()
 
     phone = params.get("From", "")
+    if not params.get("NumMedia", "0").strip("0") and params.get("Body", "").strip():
+        try:
+            from app.agent import sms as agent_sms
+
+            if await agent_sms.handle(phone, params["Body"]):
+                return twiml()  # replies go out as separate texts while the browser works
+        except Exception:
+            log.exception("browser agent failed for an inbound sms")
+            return twiml(SORRY)
     try:
         media_paths = await download_media(params)
         result = await run_in_threadpool(

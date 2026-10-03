@@ -1,5 +1,7 @@
 """A phone call that drives a paired browser, over the real ConversationRelay websocket."""
 
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import select
@@ -142,3 +144,57 @@ def test_stop_during_a_call(paired, browser):
         until(ws, "I stopped")
     with session_scope() as s:
         assert s.exec(select(BrowserTask)).one().status == "stopped"
+
+
+# ---------------------------------------------------------------- texting
+
+@pytest.fixture
+def texts(monkeypatch):
+    sent: list[str] = []
+    from app.agent import sms
+
+    monkeypatch.setattr(sms, "send_sms", lambda phone, body, **kw: sent.append(body))
+    yield sent
+    import asyncio
+
+    asyncio.run(sms.reset())
+
+
+def text_in(client, body):
+    r = client.post("/twilio/messaging", data={"From": PHONE, "Body": body, "MessageSid": "SM" + uuid.uuid4().hex})
+    assert r.status_code == 200
+    return r.text
+
+
+def wait_for(sent, needle, timeout=5.0):
+    import time
+
+    end = time.time() + timeout
+    while time.time() < end:
+        if any(needle.lower() in s.lower() for s in sent):
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"never texted {needle!r}; sent {sent}")
+
+
+def test_texting_drives_the_browser_and_remembers_the_goal(paired, browser, texts):
+    with TestClient(app) as client:
+        assert "<Message>" not in text_in(client, "Book an appointment with Dr. Smith")  # replies come as texts
+        wait_for(texts, "reply with your 4-digit PIN")
+        text_in(client, "4821")
+        wait_for(texts, "I'll get started")  # starts on the goal given before the PIN
+        wait_for(texts, "What would you like to see Dr. Smith about?")
+        text_in(client, "My knee has been hurting.")
+        wait_for(texts, "Which would you prefer?")
+        text_in(client, "Thursday")
+        wait_for(texts, "book it?")
+        text_in(client, "yes")
+        wait_for(texts, "RB-41234")
+    assert browser.browser.portal.booked == 1
+
+
+def test_text_opening_with_the_pin(paired, browser, texts):
+    with TestClient(app) as client:
+        text_in(client, "4821")
+        wait_for(texts, "What would you like help with?")
+    assert not any("reply with your 4-digit PIN" in t for t in texts)

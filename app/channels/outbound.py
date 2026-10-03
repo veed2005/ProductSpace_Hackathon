@@ -14,10 +14,13 @@ from app.events import log_message
 log = logging.getLogger(__name__)
 
 
-def send_sms(to: str, body: str, *, profile_id: Optional[int] = None, task_id: Optional[int] = None) -> Optional[str]:
-    """Send an SMS. Returns the Twilio message SID, or None in offline mode."""
+def send_sms(to: str, body: str, *, profile_id: Optional[int] = None, task_id: Optional[int] = None,
+             transcript: bool = True) -> Optional[str]:
+    """Send an SMS. Returns the Twilio message SID, or None in offline mode. `transcript=False` when the caller
+    already wrote the line to the transcript."""
     settings = get_settings()
-    log_message(to, "out", "sms", body, profile_id=profile_id, task_id=task_id)
+    if transcript:
+        log_message(to, "out", "sms", body, profile_id=profile_id, task_id=task_id)
     if not (settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_phone_number):
         log.info("[offline sms to %s] %s", to, body)
         return None

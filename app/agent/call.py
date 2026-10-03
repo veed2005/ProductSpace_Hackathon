@@ -40,6 +40,7 @@ TEXT = {
         "who": "Hi, this is Formline. Who's calling? Please say your first name.",
         "who_again": "Sorry, I didn't catch that. Please say your first name: {names}.",
         "pin": "Hi {name}. To use your browser, please say or key in your 4-digit PIN.",
+        "pin_sms": "Hi {name}, this is Formline. To use your browser, reply with your 4-digit PIN.",
         "pin_wrong": "That PIN didn't match. Please try again. You have {left} {tries} left.",
         "pin_locked": "Your PIN is locked after too many tries. A Formline partner can reset it for you. Goodbye.",
         "pin_none": "You don't have a PIN yet. Open the Formline extension on your computer to set one up. Goodbye.",
@@ -49,6 +50,7 @@ TEXT = {
         "browser_back": "Your browser is connected now.",
         "see": "I can see you have {site} open. What would you like help with?",
         "see_ready": "Thanks, {name}. I can see you have {site} open. What would you like help with?",
+        "see_working": "Thanks, {name}. I can see you have {site} open. I'll get started on that.",
         "no_page": "Thanks, {name}. I'm connected to your browser, but I don't see a web page open. Open the "
                    "website you need, then tell me what you'd like to do.",
     },
@@ -56,6 +58,7 @@ TEXT = {
         "who": "Hola, habla Formline. ¿Quién llama? Diga su nombre, por favor.",
         "who_again": "Perdón, no le entendí. Diga su nombre: {names}.",
         "pin": "Hola {name}. Para usar su navegador, diga o marque su PIN de 4 dígitos.",
+        "pin_sms": "Hola {name}, habla Formline. Para usar su navegador, responda con su PIN de 4 dígitos.",
         "pin_wrong": "Ese PIN no coincide. Intente de nuevo. Le quedan {left} intentos.",
         "pin_locked": "Su PIN quedó bloqueado. Un socio de Formline puede restablecerlo. Adiós.",
         "pin_none": "Todavía no tiene PIN. Abra la extensión de Formline en su computadora para crear uno. Adiós.",
@@ -65,6 +68,7 @@ TEXT = {
         "browser_back": "Su navegador ya está conectado.",
         "see": "Veo que tiene abierto {site}. ¿En qué le ayudo?",
         "see_ready": "Gracias, {name}. Veo que tiene abierto {site}. ¿En qué le ayudo?",
+        "see_working": "Gracias, {name}. Veo que tiene abierto {site}. Ya empiezo.",
         "no_page": "Gracias, {name}. Estoy conectado a su navegador, pero no veo ninguna página abierta. Abra el "
                    "sitio que necesita y dígame qué quiere hacer.",
     },
@@ -94,6 +98,7 @@ class CallController:
         self.conn: Optional[BrowserConnection] = None
         self._unsubscribe = hub.on_connect(self._browser_connected)
         self._closed = False
+        self._deferred: Optional[str] = None  # a goal said before the PIN; started once authorized
 
     # ------------------------------------------------------------ public
 
@@ -104,16 +109,25 @@ class CallController:
             return None
         return CallController(phone, **kwargs)
 
-    async def start(self) -> None:
+    async def start(self, *, first_text: str = "") -> None:
+        """Greet. `first_text` is a text message that opened the conversation: a PIN, or a goal to start
+        on once the caller is authorized."""
+        is_pin = bool(first_text) and len(spoken_digits(first_text)) == 4
+        if first_text:
+            log_message(self.phone, "in", self.channel, "[PIN]" if is_pin else first_text)
+            if not is_pin:
+                self._deferred = first_text
         profiles = await run_in_threadpool(pairing.paired_profiles, self.phone)
         sess = await run_in_threadpool(identity.get_session, self.phone)
         if len(profiles) == 1:
-            await self._select(profiles[0])
+            await self._select(profiles[0], quiet_pin=is_pin)
         elif sess.profile_id and any(p.id == sess.profile_id for p in profiles) and identity.pin_verified(sess):
             await self._select(next(p for p in profiles if p.id == sess.profile_id))
         else:
             self.phase = "choose"
             await self.say(TEXT["en"]["who"])
+        if is_pin and self.phase == "pin":
+            await self._check_pin(first_text)
 
     async def on_utterance(self, text: str) -> None:
         text = (text or "").strip()
@@ -123,6 +137,9 @@ class CallController:
         log_message(self.phone, "in", self.channel, logged, profile_id=self.profile.id if self.profile else None)
         if self.phase == "choose":
             await self._choose(text)
+        elif self.phase == "pin" and len(spoken_digits(text)) != 4 and not spoken_digits(text):
+            self._deferred = self._deferred or text  # "book with Dr. Smith" before the PIN
+            await self.say(self._t("pin_digits"))
         elif self.phase == "pin":
             await self._check_pin(text)
         elif self.phase == "ready":
@@ -159,7 +176,7 @@ class CallController:
             names = ", ".join(p.display_name or "Unnamed" for p in profiles)
             await self.say(TEXT["en"]["who_again"].format(names=names))
 
-    async def _select(self, profile) -> None:
+    async def _select(self, profile, *, quiet_pin: bool = False) -> None:
         self.profile = profile
         self.language = profile.preferred_language if profile.preferred_language in TEXT else "en"
         sess = await run_in_threadpool(identity.get_session, self.phone)
@@ -173,7 +190,8 @@ class CallController:
             await self._ready()
         else:
             self.phase = "pin"
-            await self.say(self._t("pin", name=profile.display_name or ""))
+            if not quiet_pin:  # the opening text already was the PIN
+                await self.say(self._t("pin_sms" if self.channel == "sms" else "pin", name=profile.display_name or ""))
 
     async def _check_pin(self, text: str) -> None:
         digits = spoken_digits(text)
@@ -230,7 +248,11 @@ class CallController:
         try:
             state = await port.page_state()
             site = site_name(state)
-            if reconnected:
+            if self._deferred:
+                goal, self._deferred = self._deferred, None
+                await self.say(self._t("see_working", name=name, site=site))
+                await self.agent.handle(goal)
+            elif reconnected:
                 await self.say(self._t("browser_back") + " " + self._t("see", site=site))
             else:
                 await self.say(self._t("see_ready", name=name, site=site))
