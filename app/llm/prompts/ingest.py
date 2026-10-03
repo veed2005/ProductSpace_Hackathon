@@ -16,7 +16,7 @@ lines, caseworker sections, voter registration, and duplicate copies of the same
 - Include what decides eligibility and benefit amount: household members, income, \
 housing costs, and any field the form marks required.
 - Repeating tables (household members, jobs): include the first row, plus the second row for \
-household members.
+household members. Only the first rows of each table are listed.
 - A yes/no question that only decides whether to ask follow-ups and has no box on the form \
 gets pdf_field null.
 
@@ -24,9 +24,9 @@ Each field:
 - id: snake_case, unique, stable (e.g. "applicant_name", "employer").
 - label: short plain-language label for read-back ("Home address").
 - type: text | number | money | date | phone | yes_no | choice | address | ssn_last4.
-- question_hint: one short spoken question, plain words, no jargon, e.g. "Including you, how \
-many people live in your home?"
-- pdf_field: the exact field name from the list, or null.
+- question_hint: one short spoken question (under 20 words), plain words, no jargon, e.g. \
+"Including you, how many people live in your home?"
+- pdf_field: the field's handle from the list (e.g. "F12"), or null.
 - yes_value / no_value (yes_no on a checkbox or radio only): the exact state to write, taken \
 from the field's states. For a checkbox, no_value is "Off".
 - options (choice only): for a radio group, the exact state names; otherwise short choices.
@@ -53,7 +53,7 @@ def user_text(*, name: str, field_lines: list[str], page_text: str, profile_keys
         "Canonical memory keys:",
         profile_keys,
         "",
-        "Fillable fields (name | type | page | label | states or options):",
+        "Fillable fields (handle | type | page | label | states or options):",
         *field_lines,
         "",
         "Form text (start of each page):",

@@ -124,15 +124,19 @@ def test_code_supplies_what_it_can_read_from_the_pdf(form_pdf, fake_llm):
 def test_prompt_describes_fields_with_printed_labels(form_pdf, fake_llm):
     ingest.ingest_pdf(form_pdf, form_id="test_form", name="Test")
     text = fake_llm.calls[0]["messages"][0]["content"]
-    assert "TextField1[0] | text | p1 | Full name: | max 40 chars" in text
-    assert "RadioButtonList[0] | radio | p1 | Are you working now? | states: 1='Yes', 0='No'" in text
+    assert "F1 | text | p1 | Full name: | max 40 chars" in text
+    assert "F3 | radio | p1 | Are you working now? | states: 1='Yes', 0='No'" in text
+    assert "TextField1[0]" not in text  # long PDF names stay out of the prompt
     assert "- employment: The person's job" in text  # canonical keys from Lane D
     assert fake_llm.calls[0]["model"] == llm.strong_model()
 
 
 def test_retries_once_with_the_problems(form_pdf, fake_llm):
-    bad = [*GOOD[:3],
+    # Repair would keep only 2 of 5 questions, so it's worth asking the model again.
+    bad = [GOOD[0],
            DraftField(id="made_up", label="X", type="text", question_hint="?", pdf_field="NoSuchField"),
+           DraftField(id="made_up2", label="Y", type="text", question_hint="?", pdf_field="NoSuchField2"),
+           DraftField(id="made_up3", label="Z", type="text", question_hint="?", pdf_field="NoSuchField3"),
            GOOD[3].model_copy(update={"condition_field": "later_field"})]
     fake_llm.drafts = [bad, GOOD]
     schema = ingest.ingest_pdf(form_pdf, form_id="test_form", name="Test")
@@ -202,6 +206,86 @@ def test_fails_cleanly_when_nothing_usable_is_left(form_pdf, fake_llm):
     fake_llm.drafts = [junk, junk]
     with pytest.raises(ValueError, match="usable question"):
         ingest.ingest_pdf(form_pdf, form_id="test_form", name="Test")
+
+
+def test_model_uses_handles_and_they_map_back(form_pdf, fake_llm):
+    fake_llm.drafts = [[f.model_copy(update={"pdf_field": h}) for f, h in zip(GOOD, ["F1", "F2", "F3", "F4", "F5"])]]
+    schema = ingest.ingest_pdf(form_pdf, form_id="test_form", name="Test")
+    assert [f.pdf_field for f in schema.fields] == [f.pdf_field for f in GOOD]
+    assert schema.fields[2].pdf_values == {"yes": "1", "no": "0"}
+
+
+def test_small_problems_are_repaired_without_a_second_call(form_pdf, fake_llm):
+    fake_llm.drafts = [[*GOOD, DraftField(id="x", label="X", type="text", question_hint="?", pdf_field="F999")]]
+    schema = ingest.ingest_pdf(form_pdf, form_id="test_form", name="Test")
+    assert len(fake_llm.calls) == 1  # repair keeps 5 of 6: not worth another model call
+    assert [f.id for f in schema.fields] == [f.id for f in GOOD]
+
+
+def test_retry_problems_name_handles_not_pdf_names(form_pdf, fake_llm):
+    dup = [GOOD[0], GOOD[0].model_copy(update={"id": "again"}), GOOD[1].model_copy(update={"id": "again2"}),
+           GOOD[1].model_copy(update={"id": "again3"})]  # repair would keep only 2 of 4
+    fake_llm.drafts = [dup, GOOD]
+    ingest.ingest_pdf(form_pdf, form_id="test_form", name="Test")
+    retry = fake_llm.calls[1]["messages"][0]["content"]
+    assert "pdf_field 'F1' is already used" in retry and "TextField1[0]" not in retry
+
+
+def test_ingest_model_setting(form_pdf, fake_llm, monkeypatch):
+    monkeypatch.setenv("FORMLINE_INGEST_MODEL", "claude-sonnet-5-5")
+    config.get_settings.cache_clear()
+    ingest.ingest_pdf(form_pdf, form_id="test_form", name="Test")
+    assert fake_llm.calls[0]["model"] == "claude-sonnet-5-5"
+
+
+def test_repeated_table_rows_are_left_out(tmp_path):
+    doc = fitz.open()
+    page = doc.new_page()
+    for i in range(5):
+        for col, label in enumerate(["Name of person", "Income of person"]):
+            w = fitz.Widget()
+            w.field_name = f"row{i}_{col}"
+            w.field_type = fitz.PDF_WIDGET_TYPE_TEXT
+            w.rect = fitz.Rect(50 + 250 * col, 50 + 30 * i, 280 + 250 * col, 66 + 30 * i)
+            w.field_label = f"{label} #{i + 1}"
+            page.add_widget(w)
+    for i in range(3):  # same label, no row number: distinct fields (home, landlord, ...), all shown
+        w = fitz.Widget()
+        w.field_name, w.field_type = f"addr{i}", fitz.PDF_WIDGET_TYPE_TEXT
+        w.rect = fitz.Rect(50, 300 + 30 * i, 280, 316 + 30 * i)
+        w.field_label = "Address:"
+        page.add_widget(w)
+    path = tmp_path / "rows.pdf"
+    doc.save(path)
+    prep = ingest.prepare(path)
+    assert prep.rows_left_out == 6  # rows 3-5 of both columns
+    assert sum("Name of person" in line for line in prep.field_lines) == 2
+    assert sum("Address:" in line for line in prep.field_lines) == 3
+    assert "6 more fields repeat the rows above" in prep.field_lines[-1]
+
+
+def test_password_protected_pdf_is_explained(tmp_path, form_pdf, fake_llm):
+    locked = tmp_path / "locked.pdf"
+    fitz.open(form_pdf).save(locked, encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="secret", owner_pw="secret")
+    with pytest.raises(ValueError, match="password-protected"):
+        ingest.ingest_pdf(locked, form_id="locked_form", name="Locked")
+
+
+def test_xfa_only_pdf_is_explained(tmp_path, fake_llm):
+    doc = fitz.open()
+    doc.new_page().insert_text((50, 50), "Please wait... this form needs Adobe Reader")
+    doc.xref_set_key(doc.pdf_catalog(), "AcroForm", "<</Fields[]/XFA[(template) ()]>>")
+    xfa = tmp_path / "xfa.pdf"
+    doc.save(xfa)
+    with pytest.raises(ValueError, match="XFA-only"):
+        ingest.ingest_pdf(xfa, form_id="xfa_form", name="XFA")
+
+
+def test_cli_dry_run_needs_no_api(form_pdf):
+    out = subprocess.run([sys.executable, str(ROOT / "scripts" / "ingest_form.py"), str(form_pdf),
+                          "--id", "x_form", "--name", "X", "--dry-run"],
+                         capture_output=True, text=True, check=True).stdout
+    assert "5 fillable fields" in out and "F1 | text | p1 | Full name:" in out
 
 
 def test_cli_help():

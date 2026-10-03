@@ -154,3 +154,10 @@ Format: decision, alternatives considered, why.
 
 **Form library files are read and written as UTF-8.**
 - Why: Python on Windows defaults to cp1252, which garbled the Spanish aliases ("seguro médico").
+
+**Upload-to-callable speed: send less, call the model once when possible, and make the model configurable.**
+- Measured without an API key (model time is still unmeasured): reading a PDF went from 1.9s to 0.24s for the 23-page Medicaid form (one pass over each page instead of one per field), and the prompt shrank 31-64% per form (SNAP 42k -> 23k chars, Medicaid 77k -> 53k, school meals 15k -> 5k).
+- How: the model sees short handles ("F12") instead of XFA names like `form1[0].#subform[6].TextField4[0]` (code maps them back, which also stops typos), and only the first two rows of a repeating table (fields whose labels differ only by "#3" or "third"). A field whose label has no row number is never hidden.
+- A second model call happens only when repairing the draft would drop more than a quarter of its questions; otherwise the instant repair wins, since a retry doubles the wait on stage.
+- `FORMLINE_INGEST_MODEL` (shared config, additive) picks a faster model for drafting without touching the strong model used for letters. Default stays the strong model until someone times both.
+- Not done: vision-based filling of flat (non-fillable) PDFs, the C5 stretch goal. Flat, XFA-only and password-protected PDFs get a specific error instead.
