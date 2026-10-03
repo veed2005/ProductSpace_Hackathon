@@ -6,6 +6,11 @@ def isolated_db(tmp_path, monkeypatch):
     """Every test gets its own SQLite file."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    # Never reach real Twilio from tests, even with real credentials in .env. Tests that check
+    # signatures turn validation back on themselves (tests/test_channels_messaging.py).
+    for var in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"):
+        monkeypatch.setenv(var, "")
+    monkeypatch.setenv("TWILIO_VALIDATE_SIGNATURES", "false")
 
     from app import config, db
 
