@@ -18,7 +18,9 @@ caller already told you something (like the doctor's name), use it without askin
 - confirm: the NEXT step would book, submit, send, pay, purchase, cancel, delete, or change something that is hard to \
 undo (usually the final button on a review page). Put exactly that one step in steps. In say, tell the caller exactly \
 what will happen using the specifics shown on the page (who, what, when, where), then ask if you should go ahead. \
-It runs only after they say yes.
+It runs only after they say yes. Do the earlier steps with act first. If the site has its own review page \
+before the final button, the button that only opens that review page is not final: use act for it, and confirm \
+the final button on the review page.
 - done: the CURRENT page itself shows the goal was accomplished (for example a confirmation message or number). Put \
 the exact text from the page that proves it in evidence, and tell the caller the result in say, including any \
 confirmation number. Never claim success because you clicked something; only the page can show it.

@@ -1,13 +1,13 @@
-"""The golden demo, end to end, with the real model: Chromium + extension + portal + a simulated phone.
+"""End-to-end with the real model: Chromium + extension + a demo site + a simulated phone call.
 
-    uv run python scripts/e2e_golden_path.py [--headed] [--runs 3]
+    uv run python scripts/e2e_golden_path.py                         # the golden demo (book with Dr. Smith)
+    uv run python scripts/e2e_golden_path.py --scenario library      # a different site: renew a library book
+    uv run python scripts/e2e_golden_path.py --runs 3 --headed --screenshots out/
 
-1. Start an isolated Formline server, launch Chromium with the extension, pair it through the popup.
-2. Open the Riverbend portal. "Call" Formline over the real ConversationRelay websocket.
-3. Enter the PIN, then: "I need to make an appointment with Dr. Smith." Answer each question the way
-   the demo caller would (knee pain, Thursday), and say yes to the confirmation.
-4. Pass only if the portal itself shows the booking (Dr. Smith, knee, Thursday) and the task was
-   verified complete. Prints the conversation and the time Formline took per caller turn.
+Each run: start an isolated Formline server, launch Chromium with the extension, pair it through the
+popup, open the site, then "call" over the real ConversationRelay websocket. A model plays the caller
+from a persona and answers each question in its own words. A run passes only if the website itself
+shows the goal was done (read from the page and its storage) and the task was verified complete.
 
 Needs OPENAI_API_KEY (or ANTHROPIC_API_KEY) in .env, and `uv run playwright install chromium`.
 """
@@ -19,6 +19,7 @@ import re
 import sqlite3
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -31,51 +32,85 @@ PHONE = "+1555000111{}"  # one number per run: pairing allows 3 codes per number
 PIN = "4821"
 
 
-CALLER_PERSONA = """You are Margaret Ellis, 68, on the phone with Formline, an assistant that is operating the \
+def _weekday(iso: str) -> int:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().weekday()
+
+
+async def riverbend_checks(page) -> dict:
+    body = await page.inner_text("main")
+    appts = json.loads(await page.evaluate("localStorage.getItem('rb_appointments') || '[]'"))
+    booked = [a for a in appts if a.get("provider") == "smith"]
+    return {
+        "success page shown": "Your appointment is scheduled" in body,
+        "one booking with Dr. Smith": len(booked) == 1,
+        "reason mentions knee": bool(booked) and "knee" in booked[0]["reason"].lower(),
+        "booked on a Thursday": bool(booked) and _weekday(booked[0]["when"]) == 3,
+    }
+
+
+async def library_checks(page) -> dict:
+    body = await page.inner_text("main")
+    loans = json.loads(await page.evaluate("localStorage.getItem('mcpl_loans') || '[]'"))
+    by_id = {b["id"]: b for b in loans}
+    return {
+        "renewal page shown": "Renewal complete" in body,
+        "The Overstory renewed": by_id.get("b1", {}).get("renewals") == 1,
+        "nothing else renewed": by_id.get("b3", {}).get("renewals", 1) == 1 and by_id.get("b2", {}).get("renewals", 2) == 2,
+    }
+
+
+SCENARIOS = {
+    "riverbend": {
+        "path": "/demo/riverbend/",
+        "site_word": "Riverbend",
+        "opening": "I need to make an appointment with Dr. Smith.",
+        "done": r"\b(scheduled|booked|confirmation)\b",
+        "checks": riverbend_checks,
+        "persona": """You are Margaret Ellis, 68, on the phone with Formline, an assistant that is operating the \
 patient portal on your computer for you. You want an appointment with Dr. Smith because your knee has been hurting \
 for about two weeks. You'd like Thursday afternoon if possible; otherwise any time is fine. You're happy with an \
 in-person office visit at the main clinic. When Formline summarizes the appointment and asks whether to go ahead, \
-say yes if it's Dr. Smith, about your knee, on Thursday. Reply with ONE short, natural spoken sentence, like a real \
-caller. Never invent questions; just answer what you were asked."""
+say yes if it's Dr. Smith, about your knee, on Thursday.""",
+    },
+    "library": {
+        "path": "/demo/library/index.html",
+        "site_word": "Library",
+        "opening": "Can you renew my library book, The Overstory?",
+        "done": r"\b(renewed|renewal is complete|now due|new due date)\b",
+        "checks": library_checks,
+        "persona": """You are Margaret Ellis, 68, on the phone with Formline, an assistant that is operating the \
+library website on your computer for you. You want to renew The Overstory, and only that book. If asked about \
+other books, say you only need The Overstory. When Formline asks whether to go ahead with renewing The Overstory, \
+say yes.""",
+    },
+}
+
+REPLY_RULES = """Reply with ONE short, natural spoken sentence, like a real caller. Never invent questions; just \
+answer what you were asked."""
 
 
-def caller_reply(line: str, history: list[str]) -> str:
-    """What the demo caller says back to Formline: a model playing Margaret, with keyword rules as fallback."""
+def caller_reply(persona: str, line: str, history: list[str]) -> str:
+    """A model plays the caller; "Yes." if it can't be reached."""
     try:
         from app.llm import client as llm
 
         convo = "\n".join(history[-8:])
-        reply = llm.text(system=CALLER_PERSONA, model="gpt-4.1-mini", max_tokens=60,
+        reply = llm.text(system=persona + " " + REPLY_RULES, model="gpt-4.1-mini", max_tokens=60,
                          messages=[{"role": "user", "content": f"Conversation so far:\n{convo}\n\nFormline just said: "
                                     f"{line}\n\nYour reply:"}])
         if reply:
             return reply.strip().strip('"')
-    except Exception:
-        pass
-    return keyword_reply(line)
-
-
-def keyword_reply(line: str) -> str:
-    t = line.lower()
-    if re.search(r"\b(go ahead|book it|should i|shall i|want me to|would you like me to|confirm|okay to)\b", t):
-        return "Yes, please book it."
-    if re.search(r"\b(about|reason|why|what brings|symptom|what's going on|wrong)\b", t):
-        return "My knee has been hurting."
-    if re.search(r"\b(prefer|which|what time|when|tuesday|thursday|time works|options)\b", t):
-        return "Thursday at 2 works."
-    if re.search(r"\b(type|visit type|in person|video)\b", t):
-        return "In person, at the office."
-    if re.search(r"\b(location|clinic|where)\b", t):
-        return "The main clinic is fine."
+    except Exception as e:
+        print(f"  (caller model unavailable: {e})")
     return "Yes."
 
 
-async def one_run(pw, server: Server, headed: bool, run: int, args_screens: str = "") -> dict:
-    context, ext = await launch_chromium_async(pw, headless=not headed)
+async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
+    context, ext = await launch_chromium_async(pw, headless=not args.headed)
     try:
         await pair_async(context, ext, server.url, phone=PHONE.format(run), name="Margaret", pin=PIN)
         page = await context.new_page()
-        await page.goto(server.url + "/demo/riverbend/")
+        await page.goto(server.url + scenario["path"])
         await page.evaluate("localStorage.clear()")
         await page.reload()
         await page.wait_for_selector("h1")
@@ -85,9 +120,10 @@ async def one_run(pw, server: Server, headed: bool, run: int, args_screens: str 
         transcript: list[str] = []
         turn_times: list[float] = []
         started = time.monotonic()
+        done = False
         async with PhoneCall(server.url, PHONE.format(run)) as call:
             async def hear() -> str:
-                line = await call.hear(90)
+                line = await call.hear(120)
                 transcript.append(f"FORMLINE: {line}")
                 print(f"  FORMLINE: {line}", flush=True)
                 return line or ""
@@ -106,76 +142,63 @@ async def one_run(pw, server: Server, headed: bool, run: int, args_screens: str 
                 line = await hear()
                 while "help" not in line.lower():
                     line = await hear()
-            assert "Riverbend" in line, line
+            assert scenario["site_word"].lower() in line.lower(), line
 
-            await say("I need to make an appointment with Dr. Smith.")
+            await say(scenario["opening"])
             t0 = time.monotonic()
-            done = False
             for _ in range(30):
                 line = await hear()
                 if not line:
                     break
-                low = line.lower()
                 if line.rstrip().endswith("?"):
                     turn_times.append(time.monotonic() - t0)
-                    await say(caller_reply(line, transcript))
+                    await say(caller_reply(scenario["persona"], line, transcript))
                     t0 = time.monotonic()
-                elif re.search(r"\b(scheduled|booked|confirmation)\b", low) and "?" not in line:
+                elif re.search(scenario["done"], line.lower()):
                     turn_times.append(time.monotonic() - t0)
                     done = True
                     break
             total = time.monotonic() - started
 
-        await asyncio.sleep(0.5)
-        body = await page.inner_text("main")
-        if args_screens:
-            await page.screenshot(path=str(Path(args_screens) / f"run{run}-portal.png"))
+        await asyncio.sleep(0.8)
+        checks = {"said it was done": done, **(await scenario["checks"](page))}
+        if args.screenshots:
+            name = f"{args.scenario}-run{run}"
+            await page.screenshot(path=str(Path(args.screenshots) / f"{name}-site.png"))
             dash = await context.new_page()
             await dash.set_viewport_size({"width": 1600, "height": 950})
             await dash.goto(server.url + "/dashboard")
             await asyncio.sleep(2.5)
-            await dash.screenshot(path=str(Path(args_screens) / f"run{run}-dashboard.png"))
+            await dash.screenshot(path=str(Path(args.screenshots) / f"{name}-dashboard.png"))
             await dash.close()
-        appts = json.loads(await page.evaluate("localStorage.getItem('rb_appointments') || '[]'"))
-        booked = [a for a in appts if a.get("provider") == "smith"]
+
         db = sqlite3.connect(server.data_dir / "formline.db")
         status = db.execute("select status, steps, model_calls from browsertask order by id desc limit 1").fetchone()
-        actions = db.execute("select kind, element_label, ok from browseraction order by id").fetchall()
+        actions = db.execute("select kind, element_label, ok from browseraction where task_id = "
+                             "(select max(id) from browsertask) order by id").fetchall()
         db.close()
-
-        checks = {
-            "said it was done": done,
-            "success page shown": "Your appointment is scheduled" in body,
-            "one booking with Dr. Smith": len(booked) == 1,
-            "reason mentions knee": bool(booked) and "knee" in booked[0]["reason"].lower(),
-            "booked on a Thursday": bool(booked) and _weekday(booked[0]["when"]) == 3,
-            "task verified complete": bool(status) and status[0] == "completed",
-            "confirmation asked before booking": [k for k, _, _ in actions].count("confirm_request") >= 1,
-        }
-        return {"run": run, "checks": checks, "total_s": round(total, 1), "turn_s": [round(t, 1) for t in turn_times],
+        checks["task verified complete"] = bool(status) and status[0] == "completed"
+        checks["confirmation asked before the final step"] = any(k == "confirm_request" for k, _, _ in actions)
+        return {"checks": checks, "total_s": round(total, 1), "turn_s": [round(t, 1) for t in turn_times],
                 "steps": status[1] if status else None, "model_calls": status[2] if status else None,
-                "actions": actions, "transcript": transcript}
+                "actions": actions}
     finally:
         await context.close()
 
 
-def _weekday(iso: str) -> int:
-    from datetime import datetime
-
-    return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().weekday()
-
-
 async def main_async(args) -> int:
+    scenario = SCENARIOS[args.scenario]
     failures = 0
     with Server(port=8767) as server:
         async with async_playwright() as pw:
             for run in range(1, args.runs + 1):
-                print(f"\n=== run {run} ===")
+                print(f"\n=== {args.scenario} run {run} ===")
                 try:
-                    r = await one_run(pw, server, args.headed, run, args.screenshots)
+                    r = await one_run(pw, server, scenario, args, run)
                 except Exception as e:
                     failures += 1
-                    print(f"RUN {run} CRASHED: {e!r}\n--- server log ---\n{server.tail(60)}")
+                    lines = [x for x in server.tail(500).splitlines() if "app.agent" in x or "ERROR" in x]
+                    print(f"RUN {run} CRASHED: {e!r}\n--- agent log ---\n" + "\n".join(lines[-60:]))
                     continue
                 ok = all(r["checks"].values())
                 failures += not ok
@@ -185,17 +208,18 @@ async def main_async(args) -> int:
                       f"{r['steps']} browser steps, {r['model_calls']} model calls")
                 if not ok or args.verbose:
                     print("  actions:", *r["actions"], sep="\n    ")
-                    print("  agent log:", *[line for line in server.tail(600).splitlines()
-                                            if "app.agent" in line or "ERROR" in line][-80:], sep="\n    ")
+                    print("  agent log:", *[x for x in server.tail(600).splitlines()
+                                            if "app.agent" in x or "ERROR" in x][-80:], sep="\n    ")
     print(f"\n{args.runs - failures}/{args.runs} runs passed")
     return 1 if failures else 0
 
 
 def main() -> int:
     p = argparse.ArgumentParser()
+    p.add_argument("--scenario", choices=sorted(SCENARIOS), default="riverbend")
     p.add_argument("--headed", action="store_true")
     p.add_argument("--runs", type=int, default=1)
-    p.add_argument("--screenshots", default="", help="folder to save the portal and dashboard screenshots in")
+    p.add_argument("--screenshots", default="", help="folder to save the site and dashboard screenshots in")
     p.add_argument("--verbose", action="store_true", help="print the action list and agent log for every run")
     return asyncio.run(main_async(p.parse_args()))
 

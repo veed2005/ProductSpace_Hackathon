@@ -132,7 +132,8 @@ def _norm(text: str) -> str:
     """For matching quoted evidence against page text: case, punctuation and spacing don't matter, so a
     quote that spans a heading and the line under it still matches."""
     text = (text or "").replace("’", "'").casefold()
-    return " ".join(re.sub(r"[^\w$#']+", " ", text).split())
+    text = re.sub(r"\[\w+\]", " ", text)  # snapshot ids the model may have copied, like [e12]
+    return " ".join(re.sub(r"[^\w$']+", " ", text).split())
 
 
 class BrowserAgent:
@@ -342,10 +343,23 @@ class BrowserAgent:
                 continue
 
             if kind == "confirm":
-                step = decision.steps[0]
-                err = validate_step(step, page)
-                if err:
-                    self.notes.append(f"Your confirm step was not accepted: {err}")
+                # Several steps: do the harmless leading ones now, and confirm only the final one.
+                *lead, step = decision.steps[:3]
+                failed = False
+                for prior in lead:
+                    err = validate_step(prior, page)
+                    if err or is_consequential(prior, page):
+                        self.notes.append(f"In a confirm, put only the one final step in steps ({err or 'two final steps'})")
+                        failed = True
+                        break
+                    if not (await self._execute(prior, page, decision.reason)).success:
+                        failed = True
+                        break
+                    page = await self._page()
+                err = None if failed else validate_step(step, page)
+                if failed or err:
+                    if err:
+                        self.notes.append(f"Your confirm step was not accepted: {err}")
                     errors += 1
                     continue
                 await self._request_confirmation(step, page, decision.say, decision.reason)

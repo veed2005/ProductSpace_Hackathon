@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta property="og:site_name" content="Maple County Public Library">
+<link rel="stylesheet" href="style.css">
+<title>My Account - Maple County Public Library</title></head>
+<body><header></header>
+<main>
+  <h1>My Account</h1>
+  <div class="tabs"><span class="on">Checked out (<span id="count">0</span>)</span><span>Holds (1)</span><span>Fines ($0.00)</span></div>
+  <div class="box">
+    <table><thead><tr><th>Select</th><th>Item</th><th>Due</th><th>Renewals</th></tr></thead><tbody id="loans"></tbody></table>
+    <p class="error" id="renew-error" role="alert" hidden></p>
+    <p><button class="primary" id="renew-selected" type="button">Renew selected items</button></p>
+  </div>
+</main>
+<script src="library.js"></script><script>renderAccount()</script></body></html>

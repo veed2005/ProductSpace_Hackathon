@@ -280,3 +280,33 @@ def test_evidence_may_span_page_elements_but_must_be_real():
     assert _norm("Your appointment is scheduled. Confirmation number RB-41234.") in page
     assert _norm("“Your appointment is scheduled”") in page
     assert _norm("Your appointment is booked") not in page
+
+
+def test_evidence_copied_with_snapshot_markup_still_matches():
+    from app.agent.runner import _norm
+
+    page = _norm("Renewal complete The Overstory is now due Mon, Oct 26.")
+    assert _norm("# Renewal complete\nThe Overstory is now due Mon, Oct 26.") in page
+    assert _norm("[e5] Renewal complete") in page
+
+
+def test_confirm_with_several_steps_runs_the_lead_and_confirms_the_last():
+    class Bundler(ScriptedModel):
+        async def __call__(self, system, messages):
+            page = messages[-1]["content"].split("CURRENT PAGE:", 1)[1]
+            if "Choose a time" in page and "thursday" in messages[-1]["content"].lower().split("current page:")[0]:
+                self.calls += 1
+                return Decision(kind="confirm", steps=[S("check", "s2"), S("click", "next")],
+                                say="Shall I continue?", reason="bundled", evidence=None)
+            return await super().__call__(system, messages)
+
+    async def scenario():
+        agent, portal, said = make(Bundler())
+        for line in ("Book with Dr. Smith", "My knee hurts", "Thursday"):
+            await agent.handle(line)
+            await settle(agent)
+        return agent, portal
+
+    agent, portal = run(scenario())
+    assert portal.slot == "thu"  # the harmless lead step ran
+    assert agent.pending["step"] == {"action": "click", "element_id": "next", "value": None}  # only the last waits
