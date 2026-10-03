@@ -1,22 +1,270 @@
 """Twilio voice + ConversationRelay. Owner: Lane B.
 
-POST /twilio/voice       (configure on the Twilio number) -> TwiML that connects ConversationRelay
-WS   /twilio/voice/relay (ConversationRelay streams transcribed speech here; we reply with text)
+POST /twilio/voice         (configure on the Twilio number) -> TwiML that connects ConversationRelay
+WS   /twilio/voice/relay   ConversationRelay streams transcribed speech here; we reply with text
+POST /twilio/voice/status  <Connect action>: called when the relay session ends
+
+Twilio does the speech-to-text and text-to-speech; this file only moves text between Twilio and
+the brain (`handle_turn`, same as SMS). Message formats:
+https://www.twilio.com/docs/voice/conversationrelay/websocket-messages
+
+Websocket auth: /twilio/voice is signed by Twilio, so it issues a one-time token that goes in the
+relay URL. The websocket refuses connections without a valid, unused token.
+
+At connect, the brain gets an empty-text voice turn: "the caller just connected, greet them".
 """
 
-from fastapi import APIRouter
+import asyncio
+import logging
+import secrets
+import threading
+import time
+from typing import Optional
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
+from twilio.twiml.voice_response import VoiceResponse
+
+from app.channels.messaging import signature_ok
+from app.channels.outbound import send_sms
+from app.config import get_settings
+from app.contracts import TurnRequest, TurnResult
+from app.core import identity
+from app.core.turn import handle_turn
+from app.events import log_event
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/twilio")
 
+# Brain language code -> BCP-47 tag for Twilio speech. Add a tag here and a <Language> is declared.
+LANG_TAGS = {"en": "en-US", "es": "es-US"}
+GREETING = {"en": "Hi, this is Formline.", "es": "Hola, habla Formline."}
+SORRY = {"en": "Sorry, something went wrong. Could you say that again?",
+         "es": "Perdón, algo salió mal. ¿Puede repetirlo?"}
+FALLBACK = ("Sorry, Formline can't take calls right now. Please text this number instead. "
+            "Lo sentimos, por favor envíe un mensaje de texto a este número.")
+
+DTMF_PAUSE_S = 2.0  # keypad digits are sent to the brain after this pause, on '#', or at 4 digits
+TOKEN_TTL_S = 120
+
+
+# ---------------------------------------------------------------- one-time relay tokens
+
+_tokens: dict[str, float] = {}
+_tokens_lock = threading.Lock()
+
+
+def issue_token() -> str:
+    now = time.monotonic()
+    token = secrets.token_urlsafe(18)
+    with _tokens_lock:
+        for t, exp in list(_tokens.items()):
+            if exp < now:
+                del _tokens[t]
+        _tokens[token] = now + TOKEN_TTL_S
+    return token
+
+
+def redeem_token(token: str) -> bool:
+    with _tokens_lock:
+        exp = _tokens.pop(token, None)
+    return exp is not None and exp >= time.monotonic()
+
+
+# ---------------------------------------------------------------- helpers
+
+def caller_language(phone: str) -> str:
+    """'en' or 'es' from the caller's profile; English for unknown or shared phones that disagree."""
+    langs = {p.preferred_language for p in identity.profiles_for_phone(phone)}
+    lang = langs.pop() if len(langs) == 1 else "en"
+    return lang if lang in LANG_TAGS else "en"
+
+
+def relay_url(token: str) -> str:
+    host = urlparse(get_settings().public_base_url).netloc
+    return f"wss://{host}/twilio/voice/relay?t={token}"
+
+
+def speech_seconds(text: str) -> float:
+    """Roughly how long TTS takes to say `text` (about 150 words a minute), capped."""
+    return min(15.0, 1.0 + len(text.split()) / 2.5)
+
+
+def _xml(resp: VoiceResponse) -> Response:
+    return Response(content=str(resp), media_type="application/xml")
+
+
+def fallback_twiml() -> Response:
+    resp = VoiceResponse()
+    resp.say(FALLBACK)
+    resp.hangup()
+    return _xml(resp)
+
+
+async def _form(request: Request) -> Optional[dict[str, str]]:
+    try:
+        return {k: str(v) for k, v in (await request.form()).items()}
+    except Exception:
+        log.exception("unreadable voice webhook body")
+        return None
+
+
+# ---------------------------------------------------------------- webhooks
 
 @router.post("/voice")
-async def inbound_call() -> Response:
-    # TODO(Lane B, Phase 7): return <Connect><ConversationRelay url="wss://.../twilio/voice/relay" .../>
-    # and implement the websocket that calls handle_turn(TurnRequest(channel="voice", ...)).
-    twiml = (
-        '<?xml version="1.0" encoding="UTF-8"?><Response>'
-        "<Say>Formline voice is coming soon. Please text this number instead.</Say>"
-        "</Response>"
-    )
-    return Response(content=twiml, media_type="application/xml")
+async def inbound_call(request: Request) -> Response:
+    params = await _form(request)
+    if params is None:
+        return fallback_twiml()
+    if not signature_ok(request, params):
+        log.warning("rejected /twilio/voice request with a bad or missing signature")
+        return Response(status_code=403)
+    try:
+        lang = await run_in_threadpool(caller_language, params.get("From", ""))
+        resp = VoiceResponse()
+        connect = resp.connect(action=get_settings().public_base_url.rstrip("/") + "/twilio/voice/status")
+        relay = connect.conversation_relay(url=relay_url(issue_token()), welcome_greeting=GREETING[lang],
+                                           language=LANG_TAGS[lang], dtmf_detection=True,
+                                           interruptible="any")
+        for tag in LANG_TAGS.values():
+            relay.language(code=tag)
+        return _xml(resp)
+    except Exception:
+        log.exception("could not build voice TwiML")
+        return fallback_twiml()
+
+
+@router.post("/voice/status")
+async def relay_ended(request: Request) -> Response:
+    """The relay session ended. If it failed (e.g. our websocket broke), apologize and hang up."""
+    params = await _form(request) or {}
+    if params and not signature_ok(request, params):
+        return Response(status_code=403)
+    if params.get("SessionStatus") == "failed":
+        log.error("voice relay failed: %s %s", params.get("ErrorCode"), params.get("ErrorMessage"))
+        return fallback_twiml()
+    resp = VoiceResponse()
+    resp.hangup()
+    return _xml(resp)
+
+
+# ---------------------------------------------------------------- relay websocket
+
+class VoiceCall:
+    """One ConversationRelay session: Twilio messages in, brain replies out."""
+
+    def __init__(self, ws: WebSocket):
+        self.ws = ws
+        self.phone = ""
+        self.lang = "en"  # brain language code
+        self.digits = ""
+        self._dtmf_timer: Optional[asyncio.Task] = None
+        self._turn_lock = asyncio.Lock()
+        self._background: set[asyncio.Task] = set()
+        self.ended = False
+
+    async def send(self, message: dict) -> None:
+        if not self.ended:
+            await self.ws.send_json(message)
+
+    async def run(self) -> None:
+        try:
+            while not self.ended:
+                await self.handle(await self.ws.receive_json())
+        except WebSocketDisconnect:
+            pass
+        finally:
+            if self._dtmf_timer:
+                self._dtmf_timer.cancel()
+
+    async def handle(self, msg: dict) -> None:
+        kind = msg.get("type")
+        if kind == "setup":
+            self.phone = msg.get("from", "")
+            self.lang = await run_in_threadpool(caller_language, self.phone)
+            await self.turn("", timed=False)  # let the brain greet (or say "welcome back")
+        elif kind == "prompt":
+            if msg.get("last", True) and msg.get("voicePrompt", "").strip():
+                await self.turn(msg["voicePrompt"])
+        elif kind == "dtmf":
+            await self.digit(str(msg.get("digit", "")))
+        elif kind == "interrupt":
+            log.info("caller interrupted after %s ms", msg.get("durationUntilInterruptMs"))
+        elif kind == "error":
+            log.error("ConversationRelay error: %s", msg.get("description"))
+
+    async def digit(self, d: str) -> None:
+        """Collect keypad digits (handy for the PIN); flush on '#', at 4 digits, or after a pause."""
+        if self._dtmf_timer:
+            self._dtmf_timer.cancel()
+            self._dtmf_timer = None
+        if d != "#":
+            self.digits += d
+        if d == "#" or len(self.digits) >= 4:
+            await self.flush_digits()
+        elif self.digits:
+            self._dtmf_timer = asyncio.create_task(self._flush_after_pause())
+
+    async def _flush_after_pause(self) -> None:
+        await asyncio.sleep(DTMF_PAUSE_S)
+        self._dtmf_timer = None
+        await self.flush_digits()
+
+    async def flush_digits(self) -> None:
+        digits, self.digits = self.digits, ""
+        if digits:
+            await self.turn(digits)
+
+    async def turn(self, text: str, *, timed: bool = True) -> None:
+        async with self._turn_lock:
+            if self.ended:
+                return
+            started = time.perf_counter()
+            try:
+                result = await run_in_threadpool(
+                    handle_turn, TurnRequest(phone=self.phone, channel="voice", text=text))
+            except Exception:
+                log.exception("voice turn failed")
+                result = TurnResult(reply=SORRY.get(self.lang, SORRY["en"]), language=self.lang)
+            await self.speak(result)
+            if timed:
+                log_event("voice_latency", phone=self.phone, channel="voice",
+                          ms=round((time.perf_counter() - started) * 1000))
+            for text_msg in result.followup_sms:
+                self._in_background(run_in_threadpool(send_sms, self.phone, text_msg))
+            if result.end_call:
+                await asyncio.sleep(speech_seconds(result.reply))  # "end" cuts speech off
+                await self.send({"type": "end"})
+                self.ended = True
+
+    async def speak(self, result: TurnResult) -> None:
+        if result.language in LANG_TAGS and result.language != self.lang:
+            tag = LANG_TAGS[result.language]
+            await self.send({"type": "language", "ttsLanguage": tag, "transcriptionLanguage": tag})
+            self.lang = result.language
+        if result.reply.strip():
+            await self.send({"type": "text", "token": result.reply, "last": True})
+
+    def _in_background(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
+        task.add_done_callback(_log_failure)
+
+
+def _log_failure(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception():
+        log.error("followup sms failed: %s", task.exception())
+
+
+@router.websocket("/voice/relay")
+async def relay(ws: WebSocket) -> None:
+    if get_settings().twilio_validate_signatures and not redeem_token(ws.query_params.get("t", "")):
+        log.warning("refused a relay websocket without a valid token")
+        await ws.close(code=1008)
+        return
+    await ws.accept()
+    await VoiceCall(ws).run()
