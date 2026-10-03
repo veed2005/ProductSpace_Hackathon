@@ -457,3 +457,80 @@ def test_stitched_quotes_count_only_if_every_piece_is_real():
                  "is the entire agreement between the parties.")
     assert A._unsupported(sentences, page) is None
     assert A._unsupported("Monthly rent is $1,450.00. The landlord allows any pet you like.", page)
+
+
+def test_the_same_click_is_not_repeated_a_third_time():
+    from app.browser.protocol import ActionResult, PageElement, PageState
+
+    page = PageState(doc_id="d", url="https://films.test/", title="Films",
+                     elements=[PageElement(id="m", role="link", label="More..."),
+                               PageElement(id="s", role="searchbox", label="Search")])
+
+    class Static(FakeBrowser):
+        async def page_state(self, *, fresh=False):
+            return page
+
+        async def act(self, step, doc_id):
+            return ActionResult(success=True, action=step.action, page_changed=True)
+
+    seen = []
+
+    async def model(system, messages):
+        seen.append(messages[-1]["content"])
+        if any("twice" in p for p in seen):
+            return Decision(kind="ask_user", steps=[], say="Which movie?", reason="x", evidence=None)
+        return Decision(kind="act", steps=[S("click", "m")], say="", reason="more", evidence=None)
+
+    from app.core import identity
+
+    profile = identity.create_profile("+15550004444", display_name="Evan")
+
+    async def say(text):
+        pass
+
+    agent = BrowserAgent(browser=Static(), say=say, profile_id=profile.id, installation_id="b",
+                         phone="+15550004444", decide=model)
+
+    async def scenario():
+        await agent.handle("Look up a movie")
+        await settle(agent)
+
+    run(scenario())
+    assert [a.kind for a in actions()].count("click") == 2
+    assert any("already did click on 'more...' twice" in (a.error or "") for a in actions("rejected"))
+
+
+def test_next_on_each_new_wizard_step_is_not_a_repeat():
+    # The golden path clicks "Next" on four different steps; none of them may be refused.
+    agent, portal, said = make()
+
+    async def scenario():
+        for line in ("Book with Dr. Smith", "My knee hurts", "Thursday", "yes"):
+            await agent.handle(line)
+            await settle(agent)
+
+    run(scenario())
+    assert portal.booked == 1 and not actions("rejected")
+
+
+def test_agent_follows_the_person_to_another_tab():
+    from app.agent.runner import ConnectionPort
+    from app.browser.hub import BrowserConnection
+    from app.browser.protocol import PageState
+
+    class Conn(BrowserConnection):
+        async def page_state(self, tab_id=None, *, fresh=False):
+            return PageState(doc_id=f"d{tab_id}", tab_id=tab_id or 1, url=f"https://site.test/{tab_id}", title=str(tab_id))
+
+    async def scenario():
+        conn = Conn(None, "b", 1)
+        conn.tab = {"tab_id": 1, "title": "Lease.pdf"}
+        port = ConnectionPort(conn)
+        first = await port.page_state()
+        conn.tab = {"tab_id": 2, "title": "Letterboxd"}  # the person clicked another tab
+        second = await port.page_state()
+        return first, second, port.take_tab_switch(), port.take_tab_switch()
+
+    first, second, switched, again = asyncio.run(scenario())
+    assert first.tab_id == 1 and second.tab_id == 2
+    assert switched == "Letterboxd" and again is None

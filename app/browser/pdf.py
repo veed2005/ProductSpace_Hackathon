@@ -78,6 +78,17 @@ def friendly_name(document: PdfDocument) -> str:
     return f"the PDF “{document.title}”" if document.title else "a PDF"
 
 
+def title_from_url(url: str) -> str:
+    """'https://bucket.s3.amazonaws.com/leases/Unit_3B-Lease.pdf?X-Amz-...' -> 'Unit 3B Lease' (empty if it's a random id)."""
+    name = _title_from_url(url).replace("_", " ").replace("-", " ").strip()
+    letters = sum(c.isalpha() for c in name)
+    return name if letters >= 3 and not re.fullmatch(r"[0-9a-f ]{16,}", name.lower()) else ""
+
+
+def on_screen(image_b64: str, title: str, reason: str) -> PdfDocument:
+    return PdfDocument(title=title, images=[image_b64], on_screen_only=reason or "The file couldn't be read.")
+
+
 def decode(b64: str) -> bytes:
     return base64.b64decode(b64)
 
@@ -87,7 +98,17 @@ def describe(document: Optional[PdfDocument]) -> str:
     if document is None:
         return ""
     if document.error:
-        return f"This tab shows a PDF ({document.title}) that can't be read: {document.error}"
+        what = f" ({document.title})" if document.title else ""
+        return (f"This tab shows a PDF{what} that can't be read: {document.error} Tell the caller plainly; "
+                "if the link expired, opening the document again from the website where they found it will let "
+                "you read it.")
+    if document.on_screen_only:
+        what = f" (“{document.title}”)" if document.title else ""
+        return (f"This tab shows a PDF{what}, but the file itself can't be read: {document.on_screen_only} "
+                "A picture of the part visible on screen is attached; that is ALL you can see. Answer only from it, "
+                "and tell the caller you can only see what's on screen right now. To read the whole document, "
+                "they can open it again from the website where they found it (its link will be fresh), and you'll "
+                "read every page.")
     head = f"This tab shows a PDF document: “{document.title}”, {document.pages} page{'s' * (document.pages != 1)}."
     if document.scanned:
         shown = min(document.pages, MAX_IMAGE_PAGES)

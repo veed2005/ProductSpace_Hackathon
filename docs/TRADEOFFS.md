@@ -296,3 +296,19 @@ Format: decision, alternatives considered, why.
 
 **Site names skip bot-check titles and prefer the part of the title that matches the address.**
 - Why: a Cloudflare check made the greeting say "I can see you have Just a moment... open".
+
+**PDFs are copied when the tab opens, because Chrome's viewer can't be read and portal links expire.**
+- Alternatives tried (all measured in Chromium): re-downloading on demand (an AppFolio/S3 link returned 403 minutes later); Chrome's HTTP cache (works only when the file has no Cache-Control; no-cache and no-store, which portals use, get 403); the viewer's select-all/get-text commands (its embed is in a closed shadow root and its frames belong to another extension, so they can't be reached); printing the tab through the DevTools protocol (prints the toolbar, one page); jumping pages with #page=N for screenshots (the viewer ignored it).
+- Why: a copy fetched in the first second, while the link is fresh, makes every later question work. It stays in that tab's memory and leaves the browser only when the person asks about the document. Without a copy (a PDF opened before the extension loaded), the visible part is captured and the agent says that's all it can see.
+
+**The agent follows the person when they switch tabs.**
+- Why: in a live call the person moved from a PDF to Letterboxd and asked "can you see Letterboxd?"; the agent was pinned to the PDF tab. The extension already reports the active tab (excluding Formline's own dashboard), so that is the page.
+
+**Names for controls with no text come from tooltip attributes, a neighbouring image, or the link's address; "icon" guesses only for small elements.**
+- Why: Letterboxd's film posters are text-less links with a `has-menu` class next to an image; the agent saw "menu (icon)" and clicked a film thinking it was a menu. Poster tooltips (`data-original-title`) and `/film/the-ritual-2017/` say what they are.
+
+**Search boxes are recognised by name, id, class, placeholder or form, and a hidden one is mentioned.**
+- Why: many sites use a plain text input named `q`, often hidden until a magnifying glass is clicked. The agent clicked "More..." seven times looking for one.
+
+**The same click on an unchanged page is refused the third time.**
+- Why: that "More..." loop. "Unchanged" means the same address and headings, so a wizard's "Next" on each new step is never refused (the first version of this guard keyed on the label alone and broke the booking flow).

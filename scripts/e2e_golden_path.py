@@ -3,6 +3,7 @@
     uv run python scripts/e2e_golden_path.py                         # the golden demo (book with Dr. Smith)
     uv run python scripts/e2e_golden_path.py --scenario library      # a different site: renew a library book
     uv run python scripts/e2e_golden_path.py --scenario pdf          # questions about a 6-page PDF lease
+    uv run python scripts/e2e_golden_path.py --scenario expiring_pdf # same, from an expired no-store link (like S3)
     uv run python scripts/e2e_golden_path.py --scenario letterboxd   # the real letterboxd.com: search for a film
     uv run python scripts/e2e_golden_path.py --runs 3 --headed --screenshots out/
 
@@ -28,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from browser_harness import Server, launch_chromium_async, pair_async  # noqa: E402
 from call_sim import PhoneCall  # noqa: E402
+from expiring_file_server import ExpiringServer  # noqa: E402
 from playwright.async_api import async_playwright  # noqa: E402
 
 PHONE = "+1555000111{}"  # one number per run: pairing allows 3 codes per number per 10 minutes
@@ -98,6 +100,16 @@ original one from 2012. Keep answers short.""",
         "persona": """You are Evan, a film fan. The movie you want is Paddington 2. If asked which movie, say \
 Paddington 2. Keep answers short.""",
     },
+    "expiring_pdf": {
+        # Served like an S3 signed link: Cache-Control: no-store, valid for 5 s. The call starts after it expired.
+        "expiring": {"file": "demo_sites/testbench/lease.pdf", "valid_s": 5, "cache_control": "no-store", "wait_s": 7},
+        "site_word": "Lease",
+        "opening": "I don't understand this contract. Can you help me?",
+        "questions": [
+            ("Can I have a dog?", ["40|forty", "300|three hundred"]),
+            ("Who signed it for the landlord?", ["Dana|Whitfield"]),
+        ],
+    },
     "letterboxd": {
         "path": "https://letterboxd.com/",
         "site_word": "Letterboxd",
@@ -158,8 +170,18 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
     try:
         await pair_async(context, ext, server.url, phone=PHONE.format(run), name="Margaret", pin=PIN)
         page = await context.new_page()
+        expiring = None
+        if scenario.get("expiring"):
+            x = scenario["expiring"]
+            expiring = ExpiringServer(x["file"], port=8780 + run, valid_s=x["valid_s"], cache_control=x["cache_control"])
+            expiring.__enter__()
+            await page.goto(expiring.url)
+            await page.bring_to_front()
+            await asyncio.sleep(x["wait_s"])  # the link has expired before the call starts
+            scenario = {**scenario, "path": expiring.url}
         external = scenario["path"].startswith("http")
-        await page.goto(scenario["path"] if external else server.url + scenario["path"])
+        if not expiring:
+            await page.goto(scenario["path"] if external else server.url + scenario["path"])
         if not external and not scenario["path"].endswith(".pdf"):
             await page.evaluate("localStorage.clear()")
             await page.reload()
@@ -197,7 +219,11 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
             await say(scenario["opening"])
             t0 = time.monotonic()
             if scenario.get("questions"):
-                return await qa_run(scenario, hear, say, transcript, server, started)
+                try:
+                    return await qa_run(scenario, hear, say, transcript, server, started)
+                finally:
+                    if expiring:
+                        expiring.__exit__(None, None, None)
             for _ in range(30):
                 line = await hear()
                 if not line:

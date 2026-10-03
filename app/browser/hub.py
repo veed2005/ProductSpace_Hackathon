@@ -128,8 +128,11 @@ class BrowserConnection:
         if cached is not None:
             return cached
         msg = await self.request("read_pdf", tab_id=state.tab_id, timeout=45)
+        title = pdf.title_from_url(state.url)
         if not msg.get("ok"):
-            return PdfDocument(title=pdf.friendly_name(PdfDocument()), error=msg.get("detail") or "It couldn't be downloaded.")
+            return PdfDocument(title=title, error=msg.get("detail") or "It couldn't be downloaded.")
+        if msg["data"].get("screenshot_base64"):  # only what's on screen; not cached, the file may come back
+            return pdf.on_screen(msg["data"]["screenshot_base64"], title, msg["data"].get("reason") or "")
         data = pdf.decode(msg["data"]["pdf_base64"])
         document = await run_in_threadpool(pdf.read, data, state.url)
         if not document.error:

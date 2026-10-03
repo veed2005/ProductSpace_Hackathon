@@ -31,14 +31,26 @@
     return true; // async response
   });
 
-  // The PDF this tab shows, as base64. Fetched from the page itself, so a PDF behind a login comes with the
-  // person's own session; nothing else (no cookies) is sent anywhere.
+  // The PDF this tab shows. Chrome's PDF viewer is sealed off from extensions, so the file itself is read:
+  // a copy is kept in this tab's memory the moment the PDF opens, while its link is still valid (document
+  // portals and S3 hand out links that expire within minutes, often marked no-store so Chrome doesn't cache
+  // them). The copy stays in this tab; it's sent to Formline only when the person asks about the document.
+  // Fetched from the page itself, so a PDF behind a login comes with the person's own session.
   const MAX_PDF_BYTES = 10 * 1024 * 1024;  // base64 must fit in the server's 16 MiB websocket message
-  async function readPdf() {
-    if (document.contentType !== "application/pdf") return { ok: false, error: "invalid_action", detail: "This tab isn't a PDF." };
-    if (location.protocol === "file:") return { ok: false, error: "needs_worker", detail: "local file" };
-    const res = await fetch(location.href, { credentials: "include" });
-    if (!res.ok) return { ok: false, error: "failed", detail: "The PDF couldn't be downloaded (HTTP " + res.status + ")." };
+  let pdfCopy = null;  // Promise of {ok, data | error, detail}
+
+  async function fetchPdf() {
+    let res;
+    try {
+      res = await fetch(location.href, { credentials: "include", cache: "force-cache" });
+    } catch (e) {
+      return { ok: false, error: "failed", detail: "The PDF couldn't be downloaded (" + e.message + ")." };
+    }
+    if (!res.ok) {
+      const expired = res.status === 401 || res.status === 403 || res.status === 410;
+      return { ok: false, error: expired ? "expired" : "failed",
+        detail: expired ? "The PDF's link has expired (HTTP " + res.status + ")." : "The PDF couldn't be downloaded (HTTP " + res.status + ")." };
+    }
     const blob = await res.blob();
     if (blob.size > MAX_PDF_BYTES) return { ok: false, error: "too_large", detail: "The PDF is over 10 MB." };
     const dataUrl = await new Promise((resolve, reject) => {
@@ -48,6 +60,18 @@
       r.readAsDataURL(blob);
     });
     return { ok: true, data: { pdf_base64: String(dataUrl).split(",", 2)[1], size: blob.size, url: location.href } };
+  }
+
+  async function readPdf() {
+    if (document.contentType !== "application/pdf") return { ok: false, error: "invalid_action", detail: "This tab isn't a PDF." };
+    if (location.protocol === "file:") return { ok: false, error: "needs_worker", detail: "local file" };
+    const kept = pdfCopy && (await pdfCopy);
+    if (kept && kept.ok) return kept;
+    return fetchPdf();  // no copy (or it failed): try again, in case the link still works
+  }
+
+  if (document.contentType === "application/pdf" && location.protocol !== "file:") {
+    pdfCopy = fetchPdf();  // right away, while the link is fresh
   }
 
   // Tell the service worker about meaningful page changes, at most every 1.5 s.

@@ -214,6 +214,17 @@ async function run(action, args, tabId) {
     if (tab.status === "loading") tab = await waitForLoad(tab.id);
     const res = await sendToTab(tab.id, { kind: "formline", action });
     if (res.ok) return res.data;
+    if (res.error === "expired" || res.error === "failed") {
+      // The file can't be fetched any more (an expired link opened before Formline could keep a copy).
+      // Last resort: what the viewer shows on screen, if this tab is the visible one.
+      if (tab.active) {
+        try {
+          const image = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 80 });
+          return { screenshot_base64: image.split(",", 2)[1], reason: res.detail, url: tab.url };
+        } catch (e) { /* fall through to the error */ }
+      }
+      throw err(res.error, res.detail);
+    }
     if (res.error !== "needs_worker") throw err(res.error, res.detail);
     // A PDF on this computer (file://): only readable if the person allowed file access for Formline.
     if (!(await chrome.extension.isAllowedFileSchemeAccess())) {

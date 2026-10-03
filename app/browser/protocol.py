@@ -61,6 +61,7 @@ class PdfDocument(BaseModel):
     truncated: bool = False
     scanned: bool = False  # no text layer: `images` holds rendered pages instead
     images: list[str] = Field(default_factory=list, exclude=True)  # base64 JPEG; never sent to the dashboard
+    on_screen_only: Optional[str] = None  # set when only the visible part could be read: why
     error: Optional[str] = None
 
 

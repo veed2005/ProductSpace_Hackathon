@@ -44,8 +44,19 @@ function header() {
 }
 
 function renderHome() {
+  document.getElementById("more").addEventListener("click", (e) => e.preventDefault());  // a tempting dead end
   document.getElementById("popular").innerHTML = FILMS.filter((f) => ["infinity-war", "past-lives", "paddington-2", "the-iron-giant"]
     .includes(f.id)).map(filmLink).join("");
+}
+
+// Search results look like Letterboxd's poster grid: the link has no text, only a tooltip attribute and
+// a "has-menu" class, drawn over the poster image next to it.
+function posterLink(f) {
+  const img = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='210'%3E%3Crect width='140' " +
+    "height='210' fill='%232c3440'/%3E%3C/svg%3E";
+  return `<li class="poster-container"><div class="film-poster"><img alt="${esc(f.title)}" src="${img}">
+    <a href="film.html?id=${f.id}" class="frame has-menu" data-original-title="${esc(f.title)} (${f.year})"><span class="overlay"></span></a>
+  </div></li>`;
 }
 
 function renderSearch() {
@@ -53,7 +64,7 @@ function renderSearch() {
   document.getElementById("query").textContent = q;
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const hits = FILMS.filter((f) => words.length && words.every((w) => f.title.toLowerCase().includes(w)));
-  document.getElementById("results").innerHTML = hits.length ? hits.map(filmLink).join("")
+  document.getElementById("results").innerHTML = hits.length ? hits.map(posterLink).join("")
     : `<li>There were no matches for your search term.</li>`;
   document.getElementById("count").textContent = `Found ${hits.length} film${hits.length === 1 ? "" : "s"} matching “${q}”`;
 }

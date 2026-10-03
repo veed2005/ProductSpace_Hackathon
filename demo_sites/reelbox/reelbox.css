@@ -22,3 +22,8 @@ h2 { color: #9ab; text-transform: uppercase; font-size: 13px; letter-spacing: 1p
 .t { color: #fff; font-weight: 700; }
 .meta { color: #9ab; }
 button { cursor: pointer; }
+.posters { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(5, 140px); gap: 14px; }
+.film-poster { position: relative; width: 140px; height: 210px; }
+.film-poster img { display: block; border-radius: 4px; }
+.film-poster .frame { position: absolute; inset: 0; border: 1px solid #456; border-radius: 4px; }
+.film-poster .frame:hover { border-color: #00e054; }

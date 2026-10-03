@@ -91,13 +91,25 @@
       if (t === "radio") return "radio";
       if (["button", "submit", "reset", "image", "file"].includes(t)) return "button";
       if (t === "range") return "slider";
-      if (t === "search") return "searchbox";
+      if (t === "search" || looksLikeSearch(el)) return "searchbox";
       return "textbox";
     }
     if (el.isContentEditable && el.hasAttribute("contenteditable")) return "textbox";
     if (/^H[1-6]$/.test(tag)) return "heading";
     if (tag === "DIALOG") return "dialog";
     return null;
+  }
+
+  // Many sites' search boxes are plain text inputs: recognise them by name, id, class, placeholder or form.
+  const SEARCH_HINT = /search|find|lookup|look up/i;
+  function looksLikeSearch(el) {
+    if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA") return false;
+    if (["q", "query", "s", "search", "keyword", "keywords", "term", "searchterm"].includes((el.name || "").toLowerCase())) return true;
+    const own = [el.id, typeof el.className === "string" ? el.className : "", el.getAttribute("placeholder"),
+      el.getAttribute("aria-label"), el.getAttribute("autocomplete")].join(" ");
+    if (SEARCH_HINT.test(own)) return true;
+    const form = el.closest("form");
+    return !!(el.closest("[role=search], search") || (form && SEARCH_HINT.test((form.getAttribute("action") || "") + " " + form.id + " " + form.className)));
   }
 
   function textOf(el) {
@@ -145,13 +157,33 @@
     if (img && img.alt) return img.alt;
     const svgTitle = el.querySelector("svg title");
     if (svgTitle) return (svgTitle.textContent || "").trim();
-    return el.title || el.getAttribute("name") || iconName(el);
+    for (const a of ["title", "data-original-title", "data-title", "data-tooltip", "data-tip", "data-name", "alt"]) {
+      const v = el.getAttribute(a);
+      if (v && v.trim()) return v.trim();
+    }
+    // A poster-style link drawn over an image next to it: <img alt="The Ritual"><a class="frame"></a>
+    const sib = el.parentElement && el.parentElement.querySelector(":scope > img[alt]");
+    if (sib && sib.alt) return sib.alt;
+    return el.getAttribute("name") || iconName(el) || linkName(el);
+  }
+
+  // "/film/the-ritual-2017/" -> "the ritual 2017"; "/search/" -> "search". Ids and hashes are skipped.
+  function linkName(el) {
+    if (el.tagName !== "A" || !el.getAttribute("href")) return "";
+    let path;
+    try { path = new URL(el.href, location.href).pathname; } catch (e) { return ""; }
+    const seg = path.split("/").filter(Boolean).pop() || "";
+    const words = decodeURIComponent(seg).replace(/\.[a-z0-9]{2,5}$/i, "").replace(/[-_+.]+/g, " ").trim();
+    if (!/[a-z]{2}/i.test(words) || /^[0-9a-f]{12,}$/i.test(words.replace(/ /g, ""))) return "";
+    return words;
   }
 
   // Icon-only buttons (a magnifying glass, a hamburger menu) often have no text or label at all. Guess a
   // name from class names, ids, data attributes and <use href="#icon-search">, marked as a guess.
   const ICON_WORDS = /\b(search|menu|close|cart|basket|account|profile|user|login|log in|sign ?in|settings|notifications?|bell|home|filter|sort|share|next|prev|previous|back|forward|play|pause|download|upload|edit|delete|trash|add|plus|more|options|help|info)\b/i;
   function iconName(el) {
+    const r = el.getBoundingClientRect();
+    if (r.width > 80 || r.height > 80) return "";  // posters and cards aren't icons, whatever their classes say
     const hints = [el.id, typeof el.className === "string" ? el.className : "", el.getAttribute("data-icon"),
       el.getAttribute("data-testid")];
     el.querySelectorAll("[class], use").forEach((n) => {
@@ -326,6 +358,12 @@
 
     if (document.body) visit(document.body, false);
     const elements = items.filter(Boolean);
+    if (!elements.some((e) => e.role === "searchbox")) {
+      const hidden = [...document.querySelectorAll("input:not([type=hidden]), textarea")].find((i) =>
+        (i.type === "search" || looksLikeSearch(i)) && !(i.checkVisibility ? i.checkVisibility({ checkVisibilityCSS: true }) : i.offsetParent));
+      if (hidden) elements.unshift({ role: "text", label: "(Note: this page has a search box that is hidden right now; a search " +
+        "button, link or magnifying-glass icon opens it.)" });
+    }
     const se = document.scrollingElement || document.documentElement;
     return {
       doc_id: DOC_ID,

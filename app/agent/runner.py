@@ -88,12 +88,23 @@ class ConnectionPort:
     def __init__(self, conn: BrowserConnection):
         self.conn = conn
         self.tab_id: Optional[int] = None
+        self._switched: Optional[str] = None
 
     async def page_state(self, *, fresh: bool = False) -> PageState:
+        # Follow the person: if they switched to another tab, that's the page now.
+        active = self.conn.tab.get("tab_id")
+        if active is not None and self.tab_id is not None and active != self.tab_id:
+            self.tab_id = active
+            self._switched = self.conn.tab.get("title") or "another tab"
+            fresh = True
         state = await self.conn.page_state(self.tab_id, fresh=fresh)
         if self.tab_id is None:
             self.tab_id = state.tab_id
         return state
+
+    def take_tab_switch(self) -> Optional[str]:
+        switched, self._switched = self._switched, None
+        return switched
 
     async def act(self, step: Step, doc_id: str) -> ActionResult:
         result = await self.conn.act(step.action, tab_id=self.tab_id, doc_id=doc_id, element_id=step.element_id,
@@ -135,6 +146,13 @@ def _trace(prompt: str, decision: Decision, ms: int) -> None:
         f.write(json.dumps({"ms": ms, "prompt": prompt, "decision": decision.model_dump()}) + "\n")
 
 
+def _page_key(page: PageState) -> str:
+    """Which page this is, for spotting a click that keeps not working: the address plus its headings. A wizard's
+    "Next" on each new step is a different page; "More..." pressed again on an unchanged page is the same."""
+    heads = "|".join(e.label for e in page.elements if e.role == "heading")[:300]
+    return f"{page.url}#{heads}"
+
+
 def _norm(text: str) -> str:
     """For matching quoted evidence against page text: case, punctuation and spacing don't matter, so a
     quote that spans a heading and the line under it still matches."""
@@ -162,6 +180,7 @@ class BrowserAgent:
         self.pending: Optional[dict] = None
         self.transcript: list[tuple[str, str]] = []
         self.history: list[str] = []
+        self._done_steps: list[tuple[str, str, str]] = []  # (page, action, element label) actually run, this task
         self.notes: list[str] = []
         self.inbox: list[str] = []
         self.steps = 0
@@ -297,6 +316,7 @@ class BrowserAgent:
         earlier = bool(self.goal)
         self.goal = goal
         self.history, self.notes = [], []
+        self._done_steps = []
         if earlier:
             self.notes.append("This is a NEW request. Earlier conversation is context only: don't reuse details "
                               "from earlier requests (like which movie or which date) unless the caller refers to "
@@ -406,6 +426,13 @@ class BrowserAgent:
                                      reason=decision.reason)
                     errors += 1
                     break
+                repeat = self._repeating(step, page)
+                if repeat:
+                    self.notes.append(repeat)
+                    store.add_action(self.task_id, "rejected", element_label=step.element_id, ok=False, error=repeat,
+                                     reason=decision.reason)
+                    errors += 1
+                    break
                 if is_consequential(step, page):
                     await self._confirm_flagged(step, page, decision)
                     return
@@ -449,6 +476,10 @@ class BrowserAgent:
         return decision
 
     async def _decide(self, page: PageState) -> Decision:
+        take = getattr(self.browser, "take_tab_switch", None)
+        switched = take() if take else None
+        if switched:
+            self.notes.append(f"The person switched to another tab ({switched!r}). Work with the page shown below now.")
         while self.inbox:
             said = self.inbox.pop(0)
             self.transcript.append(("caller", said))
@@ -465,7 +496,9 @@ class BrowserAgent:
         content: object = user
         images: list[str] = list(page.document.images) if page.document else []
         note = ""
-        if images:
+        if images and page.document and page.document.on_screen_only:
+            note = "\n\nThe picture attached is the part of the PDF visible on screen, nothing more."
+        elif images:
             note = "\n\nThe pictures attached are the PDF's pages, in order. Read them to answer."
         else:
             shot = await self._vision_fallback(page)
@@ -501,11 +534,24 @@ class BrowserAgent:
             return None
         return await self.browser.screenshot()
 
+    def _repeating(self, step: Step, page: PageState) -> Optional[str]:
+        """The same click twice already in the last few steps means it isn't working: make the model change tack."""
+        if step.action not in ("click", "press_enter"):
+            return None
+        el = page.control(step.element_id)
+        key = (_page_key(page), step.action, (el.label if el else step.element_id or "").strip().lower())
+        if sum(1 for k in self._done_steps[-5:] if k == key) >= 2:
+            return (f"You already did {step.action} on {key[2]!r} twice on this page and it didn't get you closer. Don't do it "
+                    "again: try something different (the site's search box or icon, a menu, another link), or ask "
+                    "the caller.")
+        return None
+
     async def _execute(self, step: Step, page: PageState, reason: str) -> ActionResult:
         el = page.control(step.element_id)
         label = el.label if el else (step.value or step.action)
         started = time.perf_counter()
         result = await self.browser.act(step, page.doc_id)
+        self._done_steps.append((_page_key(page), step.action, (label or "").strip().lower()))
         ms = round((time.perf_counter() - started) * 1000)
         shown = None
         if step.action in ("type", "select", "navigate", "scroll") and step.value:

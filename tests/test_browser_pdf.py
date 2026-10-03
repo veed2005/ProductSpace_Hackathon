@@ -94,3 +94,18 @@ def test_a_pdf_that_cannot_be_downloaded_is_explained():
 
 def test_page_state_without_a_document_is_unchanged():
     assert "PDF" not in page_text(PageState(doc_id="d", url="https://a.test/", title="A"))
+
+
+def test_expired_pdf_falls_back_to_what_is_on_screen():
+    class Conn(BrowserConnection):
+        async def request(self, action, *, tab_id=None, timeout=20.0, **args):
+            if action == "get_page_state":
+                return {"ok": True, "data": {"doc_id": "d1", "tab_id": 3, "elements": [], "content_type": "application/pdf",
+                                             "url": "https://bucket.s3.amazonaws.com/9f8e7d6c5b4a39281706f5e4d3c2b1a0.pdf?X-Amz-Expires=60"}}
+            return {"ok": True, "data": {"screenshot_base64": "aGVsbG8=", "reason": "The PDF's link has expired (HTTP 403)."}}
+
+    state = asyncio.run(Conn(None, "br_z", 1).page_state(fresh=True))
+    assert state.document.on_screen_only and state.document.images == ["aGVsbG8="]
+    text = page_text(state)
+    assert "visible on screen is attached" in text and "open it again from the website" in text
+    assert state.site_name == "a PDF"  # a random S3 file name isn't read out as a title
