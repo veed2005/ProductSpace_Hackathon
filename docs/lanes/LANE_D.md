@@ -34,7 +34,7 @@ You own what makes Formline smarter and what the judges see. That covers the per
 ### D2: Dashboard v1 *(Stage 1 → Checkpoint M1)*
 - **JSON endpoints:**
   - `/api/people` (profiles with current activity, channel, and language)
-  - `/api/sessions/{phone}/messages` (interleaved transcript)
+  - `/api/phones/{phone}/messages` (interleaved transcript), `/api/phones/{phone}/task` (active or latest task)
   - `/api/tasks/{id}` (schema fields joined with `Task.answers`)
   - `/api/tasks/{id}/pdf` (download `output_pdf_path`)
 - **Page `/dashboard`:** people list → live session view with the transcript labeled by channel, and the form filling in field by field, **color-coded by source** (memory / asked / corrected / unknown).

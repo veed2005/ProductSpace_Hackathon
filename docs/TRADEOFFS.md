@@ -53,3 +53,14 @@ Format: decision, alternatives considered, why.
 
 **Seeded persona includes a completed first form 45 days ago, with income and employment deliberately stale.**
 - Why: the on-stage memory metric needs a "first form" baseline, and the stale values show the re-ask-with-hint behavior.
+
+**Dashboard: vanilla JS + SSE-triggered refetch, plus a 4-second poll.**
+- Alternatives: a React/Vue build; pushing full state over the event stream.
+- Why: no build step for a 30-hour project, and nothing loaded from a CDN, because venue Wi-Fi is unreliable. Events only say "something changed" and the page refetches, so missing an event can't leave the screen wrong. The poll covers anything published from another process (e.g. the simulator run in-process).
+
+**Light theme, large type, phone numbers masked to the last 4 digits.**
+- Why: projectors wash out dark themes, judges read from the back of the room, and team phones appear on screen.
+
+**Transcript hides inbound replies that are just 4 digits.**
+- Alternatives: a `sensitive` flag on each logged message, set by the brain.
+- Why: PINs and SSN last-4 are typed as bare digits, and this needs no cross-lane change. It misses longer messages like "my pin is 1234". A per-message flag from Lane A would be exact; we can add it later.

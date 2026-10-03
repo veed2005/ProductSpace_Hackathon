@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Formline Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/static/dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">F</span>
+      <div>
+        <div class="brand-name">Formline</div>
+        <div class="brand-sub">Partner dashboard</div>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <label class="follow" title="Jump to whoever is talking to Formline right now">
+        <input type="checkbox" id="follow" checked>
+        <span>Follow live</span>
+      </label>
+      <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">Connecting…</span></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel people" aria-label="People">
+      <h2 class="panel-title">People</h2>
+      <ul id="people-list" class="people-list"></ul>
+    </section>
+
+    <section class="panel transcript" aria-label="Conversation">
+      <div class="panel-head">
+        <h2 class="panel-title" id="convo-title">Conversation</h2>
+        <div class="convo-meta" id="convo-meta"></div>
+      </div>
+      <div id="messages" class="messages">
+        <p class="empty">Pick a person, or text the Formline number to start a conversation.</p>
+      </div>
+    </section>
+
+    <section class="panel form" aria-label="Form">
+      <div id="task">
+        <p class="empty">No form in progress.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="legend" aria-label="Legend">
+    <span class="chip src-memory">From memory</span>
+    <span class="chip src-asked">Newly asked</span>
+    <span class="chip src-corrected">Corrected</span>
+    <span class="chip src-document">From a letter</span>
+    <span class="chip src-unknown">Unknown / skipped</span>
+    <span class="chip src-pending">Not yet asked</span>
+  </footer>
+
+  <script src="/dashboard/static/dashboard.js"></script>
+</body>
+</html>
