@@ -99,3 +99,9 @@ Format: decision, alternatives considered, why.
 
 **Required-field check skips checkboxes and conditional fields whose condition can't be read from the PDF.**
 - Why: unchecked means "no", which is a valid answer; and flagging a conditional field we can't evaluate would block completion on a false alarm. A caller that wants strict checks can pass an explicit list of pdf fields instead of the schema.
+**The demo uses a live new user (Rosa) whose memory is built on stage, with the seeded Maria only as a fallback.**
+- Alternatives: demo memory reuse with a pre-seeded returning user.
+- Why: judges see the profile being built in step 1 and reused in step 4, so the "x% faster" number is measured live, not staged. Maria stays seeded in case memory reuse fails.
+
+**A pre-flight script checks the demo setup instead of a printed checklist alone.**
+- Why: the failures that sink live demos are configuration (stale ngrok URL, Twilio webhook pointing at yesterday's tunnel, dev endpoint left on, key missing). Each is a few lines to check automatically, and the script prints the fix.

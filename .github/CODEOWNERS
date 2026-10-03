@@ -44,6 +44,8 @@
 /app/metrics.py                     @veed2005
 /scripts/seed_demo.py               @veed2005
 /scripts/reset_demo.py              @veed2005
+/scripts/make_demo_letter.py        @veed2005
+/scripts/demo_preflight.py          @veed2005
 /docs/PRIVACY.md                    @veed2005
 /docs/DEMO_SCRIPT.md                @veed2005
 
