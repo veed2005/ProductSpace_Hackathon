@@ -91,10 +91,21 @@ def test_messages_transcript_masks_pin_like_replies():
 
 
 def test_mask_message_rules():
-    assert mask_message("in", "6789") != "6789"
-    assert mask_message("in", "my pin is 1234") == "my pin is 1234"  # longer text is left alone
-    assert mask_message("in", "about 1300 a month") == "about 1300 a month"
-    assert mask_message("out", "1234") == "1234"
+    assert mask_message("in", "6789", after_secret_question=True) != "6789"
+    assert mask_message("in", "1450", after_secret_question=False) == "1450"  # e.g. an income answer
+    assert mask_message("in", "about 1300 a month", after_secret_question=True) == "about 1300 a month"
+    assert mask_message("out", "1234", after_secret_question=True) == "1234"
+
+
+def test_transcript_masks_only_after_a_secret_question():
+    seed_demo()
+    log_message(PHONE, "out", "sms", "¿Cuánto gana tu hogar al mes?")
+    log_message(PHONE, "in", "sms", "1450")
+    log_message(PHONE, "out", "sms", "¿Los últimos 4 dígitos de tu Seguro Social?")
+    log_message(PHONE, "in", "sms", "6789")
+    with _client() as c:
+        texts = [m["text"] for m in c.get(f"/api/phones/{PHONE}/messages").json()]
+    assert "1450" in texts and "6789" not in texts
 
 
 def test_pdf_download(tmp_path):

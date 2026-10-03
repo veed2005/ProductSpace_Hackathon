@@ -15,16 +15,22 @@
         <div class="brand-sub">Partner dashboard</div>
       </div>
     </div>
+    <nav class="nav" aria-label="Views">
+      <button class="nav-btn active" data-page="live">Live</button>
+      <button class="nav-btn" data-page="forms">Forms</button>
+      <button class="nav-btn" data-page="metrics">Metrics</button>
+    </nav>
     <div class="topbar-right">
       <label class="follow" title="Jump to whoever is talking to Formline right now">
         <input type="checkbox" id="follow" checked>
         <span>Follow live</span>
       </label>
+      <button class="btn secondary demo-btn" id="demo-btn">Demo</button>
       <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">Connecting…</span></span>
     </div>
   </header>
 
-  <main class="layout">
+  <main class="layout" id="page-live">
     <section class="panel people" aria-label="People">
       <h2 class="panel-title">People</h2>
       <ul id="people-list" class="people-list"></ul>
@@ -44,14 +50,58 @@
       <div class="tabs" role="tablist">
         <button class="tab active" role="tab" data-view="form" aria-selected="true">Form</button>
         <button class="tab" role="tab" data-view="memory" aria-selected="false">Memory</button>
+        <button class="tab" role="tab" data-view="letter" aria-selected="false">Letter</button>
         <div class="profile-switch" id="profile-switch"></div>
       </div>
       <div id="task">
         <p class="empty">No form in progress.</p>
       </div>
       <div id="memory" hidden></div>
+      <div id="letter" hidden></div>
     </section>
   </main>
+
+  <main class="library" id="page-forms" hidden>
+    <section class="panel lib-list" aria-label="Form library">
+      <div class="panel-head">
+        <h2 class="panel-title">Form library</h2>
+      </div>
+      <button class="btn add-form" id="add-form">+ Add a new form</button>
+      <ul id="forms-list" class="forms-list"></ul>
+    </section>
+    <section class="panel lib-detail" aria-label="Form details">
+      <div id="form-detail"><p class="empty">Pick a form to see its questions.</p></div>
+    </section>
+  </main>
+
+  <main class="metrics-page" id="page-metrics" hidden>
+    <div id="metrics"></div>
+  </main>
+
+  <dialog id="demo-dialog" class="upload-dialog demo-dialog">
+    <div class="demo-body">
+      <div class="detail-head">
+        <h2>Demo controls</h2>
+        <button class="btn secondary" id="demo-close">Close</button>
+      </div>
+      <div id="demo-content"></div>
+    </div>
+  </dialog>
+
+  <dialog id="upload-dialog" class="upload-dialog">
+    <form id="upload-form" method="dialog">
+      <h2>Add a new form</h2>
+      <p class="hint">Upload the official fillable PDF. Formline reads its fields and writes the questions to ask, usually in under a minute.</p>
+      <label>PDF file <input type="file" name="file" accept="application/pdf,.pdf" required></label>
+      <label>Form name <input type="text" name="name" placeholder="e.g. LIHEAP Energy Assistance Application" required></label>
+      <label>What people might call it <input type="text" name="aliases" placeholder="heating help, energy bill help, LIHEAP"></label>
+      <div class="upload-status" id="upload-status" role="status"></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn secondary" id="upload-cancel">Cancel</button>
+        <button type="submit" class="btn" id="upload-submit">Upload and generate questions</button>
+      </div>
+    </form>
+  </dialog>
 
   <footer class="legend" aria-label="Legend">
     <span class="chip src-memory">From memory</span>

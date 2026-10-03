@@ -94,7 +94,7 @@ def _seed_maria(phone: str) -> int:
     f("utilities", {"pays_heating_cooling": True, "pays_electric": True, "pays_water": False,
                     "pays_phone": True, "monthly_amount": 160}, 45)
     f("disability_in_household", False, 45)
-    f("case_numbers", {"snap": "IL-SNAP-448120"}, 40, src="document", ref="seed-letter")
+    f("case_numbers", {"snap": "448120917"}, 40, src="document", ref="seed-letter")
 
     # One completed form 45 days ago: the "first form" baseline for the memory metric.
     started, finished = _ago(45), _ago(45) + timedelta(minutes=11)

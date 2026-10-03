@@ -74,3 +74,108 @@ Format: decision, alternatives considered, why.
 **Twilio webhooks are set by a script (`python -m app.channels.twilio_setup`), not by hand in the console.**
 - Alternatives: click through the console every time; a reserved ngrok domain only.
 - Why: a free ngrok URL changes on every restart, and a stale webhook silently breaks the demo. The script can read the live URL from the local ngrok agent, repoints both webhooks in one step, and reports missing capabilities and (on trial accounts) unverified phones.
+**Form upload runs ingestion inside the request (no job queue), with a live elapsed-time counter in the dialog.**
+- Alternatives: background job + polling.
+- Why: ingestion targets under a minute and happens a handful of times, mostly on stage. A synchronous request is one moving part instead of three. A failed ingestion removes the half-written form folder so the upload can be retried.
+
+**The form library flags problems instead of blocking: PDF fields that don't exist, unknown memory keys, broken conditions, SSN fields not marked sensitive.**
+- Why: generated schemas are drafts. The reviewer sees exactly what to fix before pressing "Mark reviewed".
+
+**The dashboard and its API only answer requests made on the machine running Formline.**
+- Alternatives: a password; leave it open.
+- Why: during the demo ngrok exposes the whole server so Twilio can reach the webhooks, which would also put personal data and the "Reset everything" button on a public URL. ngrok forwards from localhost but adds `X-Forwarded-For`, so the check rejects any request that's non-local or carries proxy headers. `/twilio/*` is unaffected. `FORMLINE_DASHBOARD_REMOTE=true` turns it off for a trusted network. A password would be the production answer.
+
+**Metrics come from the `events` table; the per-form "x% faster" banner comes from task timestamps.**
+- Why: metrics follow the brief's event contract and keep working after "forget me" strips identity. The live banner only needs this person's previous task, which the tasks table answers directly. Both use the same definition: time from form start to completion.
+
+**Transcript hides a 4-digit reply only when Formline's previous message asked for a PIN or SSN digits.**
+- Why: the first version hid every bare 4-digit reply, which also hid income answers like "1450" during testing.
+
+**PDF fill: checkbox and radio values map to the widget's real on-state; unrecognized values are left unset.**
+- Alternatives: write the schema's `pdf_values` string as-is; treat any non-empty value as "checked".
+- Why: real forms use "On", "1", "Y" or custom names instead of "Yes", and writing the wrong name leaves the box blank in most viewers. Mapping yes/true/on/x and the on-state itself covers schemas written without opening the PDF. A value like "sometimes" isn't guessed: it stays unchecked and `verify_pdf` reports a mismatch, so the brain re-asks instead of shipping a wrong box.
+
+**PDF fill strips the XFA layer and sets NeedAppearances.**
+- Why: many government PDFs are XFA hybrids, and Acrobat shows the (empty) XFA data instead of the AcroForm values we wrote. Regenerated appearances plus NeedAppearances make values show in Preview, Chrome and Acrobat. The cost is that XFA-only scripting (dynamic sections, calculations) no longer runs, which we don't use.
+
+**Truncation is measured, not guessed: base-14 font widths against the widget rect.**
+- Alternatives: rely on `max_length` only; render and OCR the result.
+- Why: most boxes have no MaxLen, and long names and addresses are the realistic failure. Unknown embedded fonts are measured as Helvetica, which can be off by a few percent; auto-size fields count as truncated only when the text would shrink below 6pt. Multiline uses greedy word wrap at 1.15 line height.
+
+**Required-field check skips checkboxes and conditional fields whose condition can't be read from the PDF.**
+- Why: unchecked means "no", which is a valid answer; and flagging a conditional field we can't evaluate would block completion on a false alarm. A caller that wants strict checks can pass an explicit list of pdf fields instead of the schema.
+**The demo uses a live new user (Rosa) whose memory is built on stage, with the seeded Maria only as a fallback.**
+- Alternatives: demo memory reuse with a pre-seeded returning user.
+- Why: judges see the profile being built in step 1 and reused in step 4, so the "x% faster" number is measured live, not staged. Maria stays seeded in case memory reuse fails.
+
+**A pre-flight script checks the demo setup instead of a printed checklist alone.**
+- Why: the failures that sink live demos are configuration (stale ngrok URL, Twilio webhook pointing at yesterday's tunnel, dev endpoint left on, key missing). Each is a few lines to check automatically, and the script prints the fix.
+
+**Demo forms are all Illinois: IDHS IL444-0683 (SNAP), HFS 2378H (Medicaid), ISBE 68-06 (school meals).**
+- Alternatives: the combined IL444-2378B (cash + medical + SNAP, 20 pages); USDA's prototype school meals form; other states' Medicaid renewals.
+- Why: same state means the same household, income and address questions, so memory reuse is obvious on stage. All three are fillable AcroForms (two are XFA hybrids, which `fill_pdf` handles), and SNAP-only 0683 is half the length of 2378B. Illinois has no blank Medicaid renewal form (renewals are mailed pre-filled, and DC/Ohio renewals we found are flat scans), so the HFS 2378H medical benefits application stands in for "Medicaid renewal"; its aliases include "Medicaid renewal".
+
+**The SNAP schema is 27 hand-picked fields, not the form's 367.**
+- Why: a phone conversation can't ask 367 questions. We ask what decides eligibility and benefit size (household, income, rent) plus contact details, and leave the rest (immigration table, race, signature) for the caseworker. Yes/No answers map to on-states by button position, because this form names them inconsistently ("0" is Yes on most rows and No on others).
+
+**Gaps in the SNAP schema we accepted for now.**
+- The applicant's name is written once (page 1), not again in row 1 of the household table, because a schema field maps to one PDF field. An additive `also_pdf_fields` on `FormField` would fix it.
+- The household member's name box isn't mapped to memory: it wants "Last, First" in one box, and memory stores first/last separately with no formatter for a list item's full name. Asked Lane D for one.
+- The SSN box gets whatever Lane A writes for the last 4 (e.g. "XXX-XX-1234"); full SSNs are never collected.
+
+**`match_form` matches whole words, longest alias first, accents ignored.**
+- Why: substring matching made "EBT" match "medical debt" and "SNAP" match "snapshot". Longest-first lets a specific alias ("school lunch") beat a generic one, and accent folding lets "almuerzo gratis" match "almuerzo gratís" typed on a phone.
+
+**`fill_pdf` writes button states as raw PDF names.**
+- Why: pymupdf decodes escaped names when writing, so the school meals form's "Hispanic#2FLatino" became /Hispanic/Latino and the radio showed blank in every viewer. We set /AS and /V ourselves after pymupdf's update.
+
+**Document engine: one strong-model call over all photos, then deterministic checks on the result.**
+- Alternatives: OCR first and send text; one call per page; let the model's output stand.
+- Why: vision reads layout (which date is the deadline, which number is the case number) better than OCR text, and one call keeps a multi-page letter coherent. Code then enforces what the model must not decide alone: `related_form_id` must exist in the library, Social Security numbers are dropped from reference numbers, confidence is clamped, and a keyword backstop sets `high_stakes` for eviction/court/immigration even if the model misses it (it never downgrades the model's `true`).
+
+**Letter text is only ever inside the image; the system prompt says photos are data.**
+- Why: prompt injection in a mailed letter ("ignore previous instructions") is a real risk for a tool that reads strangers' mail. Nothing from the photo is copied into a text block, so the only instructions the model sees come from us. A live test sends a letter with an injection attempt.
+
+**Photos are downscaled to 2000 px and re-encoded as JPEG when needed; PDFs are rendered (first 5 pages).**
+- Why: phone photos are often 4000 px and several MB, which is slower and costlier with no gain in readability, and MMS can deliver PDFs or formats the API doesn't take. Anything we can't open (e.g. HEIC) is reported in `unreadable_parts` so the brain can ask for a retake; with nothing readable, we skip the model call entirely.
+
+**`explain_document` raises on API failure instead of returning a low-confidence result.**
+- Why: a low-confidence result makes the brain say "the photo is blurry, please retake it", which is wrong when the real problem is the network. Lane A catches the error and apologizes instead.
+**Ingestion: the model picks and words the questions; code supplies and checks everything it can read from the PDF.**
+- Alternatives: one question per PDF field; let the model's draft stand.
+- Why: a 580-field form can't become 580 phone questions, so choosing 12-40 is the model's job. But field names, Yes/No states, max lengths and SSN handling are facts in the PDF, so code fills them in (Yes/No from the printed "Yes"/"No" labels, then the model's guess, then layout) and checks the draft (fields exist, no box used twice, conditions point backwards, memory keys are canonical). It retries once with the problems listed, then repairs what's left (drops invented boxes, renames duplicate ids, clears bad keys) so a stage upload never fails on a bad draft. Output is always `reviewed: false`.
+
+**The model sees each field's tooltip or printed label, not just its name.**
+- Why: government PDFs name fields `TextField1[3]` or (really) `breastcancer[2]` for "wages/self-employment". Tooltips are usually descriptive; when they're the authoring tool's default, we use the words printed to the left of (or above) the box. Page text is trimmed to the start of each page to keep a 23-page form fast.
+
+**Medicaid and school meals schemas were hand-written, not generated.**
+- Why: no API key was available on the Lane C machine, and these two are demo-critical. They were built against the PDFs with the same checks ingestion uses, fill-and-verify tested, and are marked reviewed. Ingestion itself is covered by mocked tests and one live test.
+
+**`fill_pdf` shrinks text to fit a tight box (down to 6pt) before reporting truncation.**
+- Why: the Medicaid date-of-birth boxes are 47pt wide, so "03/14/1988" lost its last digit at the form's 10pt. Real forms are full of boxes like that. Shrinking keeps the full value readable; anything that won't fit at 6pt is still reported by `verify_pdf`.
+
+**`match_form` falls back to the fast model only when no alias matches.**
+- Why: aliases cover what people usually say and cost nothing; "help paying for groceries" needs language understanding. The model may only return a real form_id, and any error means "no match", so the brain asks instead of crashing.
+
+**Form library files are read and written as UTF-8.**
+- Why: Python on Windows defaults to cp1252, which garbled the Spanish aliases ("seguro médico").
+
+**Upload-to-callable speed: send less, call the model once when possible, and make the model configurable.**
+- Measured without an API key (model time is still unmeasured): reading a PDF went from 1.9s to 0.24s for the 23-page Medicaid form (one pass over each page instead of one per field), and the prompt shrank 31-64% per form (SNAP 42k -> 23k chars, Medicaid 77k -> 53k, school meals 15k -> 5k).
+- How: the model sees short handles ("F12") instead of XFA names like `form1[0].#subform[6].TextField4[0]` (code maps them back, which also stops typos), and only the first two rows of a repeating table (fields whose labels differ only by "#3" or "third"). A field whose label has no row number is never hidden.
+- A second model call happens only when repairing the draft would drop more than a quarter of its questions; otherwise the instant repair wins, since a retry doubles the wait on stage.
+- `FORMLINE_INGEST_MODEL` (shared config, additive) picks a faster model for drafting without touching the strong model used for letters. Default stays the strong model until someone times both.
+- Not done: vision-based filling of flat (non-fillable) PDFs, the C5 stretch goal. Flat, XFA-only and password-protected PDFs get a specific error instead.
+
+**Demo rehearsal fills all three forms for the seeded persona, from memory, in the test suite.**
+- Why: it's the on-stage path end to end (Lane D's seed -> memory -> schema `profile_key` -> PDF -> verify) and it caught a real bug: the seeded SNAP case number `IL-SNAP-448120` is 14 characters, but the school meals box holds 9, so it would print cut off. The seed now uses `448120917`, and the schema validates the case number (up to 9 letters or digits) so a longer one is re-asked. `FORMLINE_KEEP_DEMO_PDFS=1` keeps the filled PDFs in `data/demo/filled/` for eyeballing.
+
+**`app/pdf/format.py`: `pdf_value(field, answer)` turns stored values into what paper forms expect.**
+- Why: memory stores ISO dates and E.164 phones, so the Medicaid PDF showed `+12025550101` and dates as `1988-03-14`. US forms want `(202) 555-0101` and `03/14/1988`, money without "$", and the form's own checkbox states. Lane A's completion step can call it per field.
+
+**Option labels are read from whichever side the form prints them.**
+- Why: the SNAP and Medicaid forms print "[ ] Yes [ ] No"; the SNAP renewal prints "Yes [ ] No [ ]". Reading only the word right of a button mapped the second layout backwards. If the word just left of a group's leftmost button is Yes/No/Sí, labels are on the left.
+
+**The finale form is the 3-page IDHS SNAP Redetermination (IL444-1893), kept in `forms/_new_form_demo/` without a meta.json.**
+- Alternatives: a county LIHEAP application (12 pages, a scanned page with boxes laid over it).
+- Why: it's clean, short (about a 3k-token prompt), Illinois, and overlaps the SNAP application, so the newly added form fills mostly from memory on stage. Without meta.json the library ignores it until it's uploaded.

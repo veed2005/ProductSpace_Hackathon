@@ -1,0 +1,20 @@
+{
+  "form_id": "il_medicaid",
+  "name": "Illinois Medicaid Application (Medical Benefits)",
+  "aliases": [
+    "Medicaid",
+    "Medicaid renewal",
+    "renew my Medicaid",
+    "medical benefits",
+    "medical card",
+    "health coverage",
+    "All Kids",
+    "HFS 2378H",
+    "renovar Medicaid",
+    "seguro médico",
+    "tarjeta médica",
+    "beneficios médicos"
+  ],
+  "agency": "Illinois Department of Healthcare and Family Services (HFS)",
+  "description": "Form HFS 2378H: mail-in application for medical benefits (Medicaid, All Kids, FamilyCare). Illinois mails renewals pre-filled, so this blank form stands in for the Medicaid renewal in the demo."
+}

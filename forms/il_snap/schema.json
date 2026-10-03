@@ -1,0 +1,326 @@
+{
+  "form_id": "il_snap",
+  "name": "Illinois SNAP Application",
+  "reviewed": true,
+  "fields": [
+    {
+      "id": "applicant_name",
+      "label": "Full name",
+      "required": true,
+      "question_hint": "What is your full name?",
+      "pdf_field": "form1[0].#subform[0].TextField1[0]",
+      "profile_key": "full_name",
+      "group": "About you"
+    },
+    {
+      "id": "date_of_birth",
+      "label": "Date of birth",
+      "type": "date",
+      "required": true,
+      "question_hint": "What is your date of birth?",
+      "pdf_field": "form1[0].#subform[4].Table4[0].Row2[0].DateTimeField2[0]",
+      "profile_key": "date_of_birth",
+      "group": "About you"
+    },
+    {
+      "id": "address",
+      "label": "Home address",
+      "type": "address",
+      "required": true,
+      "question_hint": "What is your home address, including the city and zip code?",
+      "pdf_field": "form1[0].#subform[0].TextField1[7]",
+      "profile_key": "address",
+      "group": "About you"
+    },
+    {
+      "id": "has_mailing_address",
+      "label": "Gets mail at a different address",
+      "type": "yes_no",
+      "question_hint": "Do you get your mail at a different address?",
+      "group": "About you"
+    },
+    {
+      "id": "mailing_address",
+      "label": "Mailing address",
+      "type": "address",
+      "question_hint": "What address should we send mail to?",
+      "pdf_field": "form1[0].#subform[0].TextField1[3]",
+      "profile_key": "mailing_address",
+      "condition": {
+        "field": "has_mailing_address",
+        "equals": "yes"
+      },
+      "group": "About you"
+    },
+    {
+      "id": "phone",
+      "label": "Phone number",
+      "type": "phone",
+      "question_hint": "What is the best phone number to reach you?",
+      "pdf_field": "form1[0].#subform[0].TextField1[4]",
+      "profile_key": "phone",
+      "group": "About you"
+    },
+    {
+      "id": "ssn_last4",
+      "label": "Last 4 of SSN",
+      "type": "ssn_last4",
+      "question_hint": "What are the last four digits of your Social Security number? You can skip this; your caseworker will ask for the full number.",
+      "pdf_field": "form1[0].#subform[4].Table4[0].Row2[0].Cell5[0]",
+      "profile_key": "ssn_last4",
+      "validation": "^\\d{4}$",
+      "sensitive": true,
+      "group": "About you"
+    },
+    {
+      "id": "speaks_english",
+      "label": "Speaks English fluently",
+      "type": "yes_no",
+      "question_hint": "Do you speak English fluently?",
+      "pdf_field": "form1[0].#subform[4].RadioButtonList[2]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "Language"
+    },
+    {
+      "id": "language",
+      "label": "Language spoken",
+      "question_hint": "What language do you speak?",
+      "pdf_field": "form1[0].#subform[4].TextField1[9]",
+      "condition": {
+        "field": "speaks_english",
+        "equals": "no"
+      },
+      "group": "Language"
+    },
+    {
+      "id": "household_size",
+      "label": "People in household",
+      "type": "number",
+      "required": true,
+      "question_hint": "Including you, how many people live with you?",
+      "pdf_field": "form1[0].#subform[4].TextField1[10]",
+      "profile_key": "household_size",
+      "group": "Household"
+    },
+    {
+      "id": "has_household_members",
+      "label": "Others applying with you",
+      "type": "yes_no",
+      "question_hint": "Is anyone else applying with you, like a spouse or children?",
+      "group": "Household"
+    },
+    {
+      "id": "member_name",
+      "label": "Household member's name",
+      "question_hint": "What is the full name of the next person applying with you?",
+      "pdf_field": "form1[0].#subform[4].Table4[0].Row3[0].Cell1[0]",
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "member_relationship",
+      "label": "Household member's relationship",
+      "question_hint": "How is this person related to you?",
+      "pdf_field": "form1[0].#subform[4].Table4[0].Row3[0].Cell5[1]",
+      "profile_key": "household_members[0].relationship",
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "member_date_of_birth",
+      "label": "Household member's date of birth",
+      "type": "date",
+      "question_hint": "What is their date of birth?",
+      "pdf_field": "form1[0].#subform[4].Table4[0].Row3[0].DateTimeField3[0]",
+      "profile_key": "household_members[0].date_of_birth",
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "member_buys_food",
+      "label": "Buys and cooks food with you",
+      "type": "yes_no",
+      "question_hint": "Do they buy and cook food with you?",
+      "pdf_field": "form1[0].#subform[4].Table4[0].Row3[0].#subform[0].RadioButtonList[0]",
+      "pdf_values": {
+        "yes": "1",
+        "no": "0"
+      },
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "elderly_in_household",
+      "label": "Anyone 60 or older",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Are you or anyone who lives with you 60 or older?",
+      "pdf_field": "form1[0].#subform[4].RadioButtonList[4]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "disability_in_household",
+      "label": "Anyone disabled",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Is anyone in your home disabled?",
+      "pdf_field": "form1[0].#subform[4].RadioButtonList[6]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "profile_key": "disability_in_household",
+      "group": "Household"
+    },
+    {
+      "id": "employed",
+      "label": "Has income from a job",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Does anyone in your home have a job right now?",
+      "pdf_field": "form1[0].#subform[7].CheckBox2[10]",
+      "pdf_values": {
+        "yes": "1",
+        "no": "Off"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "worker_name",
+      "label": "Who works",
+      "required": true,
+      "question_hint": "Who in your home has the job?",
+      "pdf_field": "form1[0].#subform[7].Table5[0].Row2[0].Cell1[0]",
+      "condition": {
+        "field": "employed",
+        "equals": "yes"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "employer",
+      "label": "Employer",
+      "required": true,
+      "question_hint": "Who do they work for?",
+      "pdf_field": "form1[0].#subform[7].Table5[0].Row2[0].Cell2[0]",
+      "profile_key": "employment.employer",
+      "condition": {
+        "field": "employed",
+        "equals": "yes"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "gross_pay",
+      "label": "Gross pay per paycheck",
+      "type": "money",
+      "required": true,
+      "question_hint": "About how much is each paycheck, before taxes?",
+      "pdf_field": "form1[0].#subform[7].Table5[0].Row2[0].Cell4[0]",
+      "profile_key": "employment.gross_pay",
+      "condition": {
+        "field": "employed",
+        "equals": "yes"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "hours_per_week",
+      "label": "Hours per week",
+      "type": "number",
+      "question_hint": "About how many hours a week do they work?",
+      "pdf_field": "form1[0].#subform[7].Table5[0].Row2[0].Cell5[0]",
+      "profile_key": "employment.hours_per_week",
+      "condition": {
+        "field": "employed",
+        "equals": "yes"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "pay_frequency",
+      "label": "How often paid",
+      "type": "choice",
+      "required": true,
+      "question_hint": "How often do they get paid?",
+      "pdf_field": "form1[0].#subform[7].Table5[0].Row2[0].Cell6[0]",
+      "profile_key": "employment.pay_frequency",
+      "options": [
+        "weekly",
+        "biweekly",
+        "semimonthly",
+        "monthly"
+      ],
+      "condition": {
+        "field": "employed",
+        "equals": "yes"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "stopped_working",
+      "label": "Stopped working recently",
+      "type": "yes_no",
+      "question_hint": "Has anyone stopped working in the last three months?",
+      "pdf_field": "form1[0].#subform[7].RadioButtonList[29]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "rents_home",
+      "label": "Rents their home",
+      "type": "yes_no",
+      "question_hint": "Do you rent your apartment, house or trailer?",
+      "pdf_field": "form1[0].#subform[4].CheckBox1[0]",
+      "pdf_values": {
+        "yes": "1",
+        "no": "Off"
+      },
+      "group": "Housing costs"
+    },
+    {
+      "id": "rent_amount",
+      "label": "Rent",
+      "type": "money",
+      "required": true,
+      "question_hint": "How much is your rent each month?",
+      "pdf_field": "form1[0].#subform[10].Table6[3].Row2[0].Cell2[0]",
+      "profile_key": "housing_cost",
+      "condition": {
+        "field": "rents_home",
+        "equals": "yes"
+      },
+      "group": "Housing costs"
+    },
+    {
+      "id": "electric_bill",
+      "label": "Electric bill",
+      "type": "money",
+      "question_hint": "About how much is your electric bill each month? You can skip this.",
+      "pdf_field": "form1[0].#subform[14].Table7[0].Row2[0].Cell2[0]",
+      "group": "Housing costs"
+    }
+  ]
+}

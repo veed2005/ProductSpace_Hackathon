@@ -1,0 +1,398 @@
+{
+  "form_id": "il_medicaid",
+  "name": "Illinois Medicaid Application (Medical Benefits)",
+  "reviewed": true,
+  "fields": [
+    {
+      "id": "applicant_name",
+      "label": "Full name",
+      "required": true,
+      "question_hint": "What is your full name?",
+      "pdf_field": "form1[0].#subform[6].TextField2[4]",
+      "profile_key": "full_name",
+      "group": "About you",
+      "max_length": 50
+    },
+    {
+      "id": "date_of_birth",
+      "label": "Date of birth",
+      "type": "date",
+      "required": true,
+      "question_hint": "What is your date of birth?",
+      "pdf_field": "form1[0].#subform[6].TextField4[0]",
+      "profile_key": "date_of_birth",
+      "group": "About you",
+      "max_length": 20
+    },
+    {
+      "id": "address",
+      "label": "Home address",
+      "type": "address",
+      "required": true,
+      "question_hint": "What is your home address, with city and zip code?",
+      "pdf_field": "form1[0].#subform[6].TextField2[2]",
+      "profile_key": "address",
+      "group": "About you",
+      "max_length": 50
+    },
+    {
+      "id": "has_mailing_address",
+      "label": "Gets mail elsewhere",
+      "type": "yes_no",
+      "question_hint": "Do you get your mail at a different address?",
+      "group": "About you"
+    },
+    {
+      "id": "mailing_address",
+      "label": "Mailing address",
+      "type": "address",
+      "question_hint": "What address should we send mail to?",
+      "pdf_field": "form1[0].#subform[6].TextField2[1]",
+      "profile_key": "mailing_address",
+      "condition": {
+        "field": "has_mailing_address",
+        "equals": "yes"
+      },
+      "group": "About you",
+      "max_length": 50
+    },
+    {
+      "id": "phone",
+      "label": "Daytime phone",
+      "type": "phone",
+      "question_hint": "What is the best phone number to reach you during the day?",
+      "pdf_field": "form1[0].#subform[6].TextField2[3]",
+      "profile_key": "phone",
+      "group": "About you",
+      "max_length": 15
+    },
+    {
+      "id": "wants_spanish",
+      "label": "Spanish preferred",
+      "type": "yes_no",
+      "question_hint": "Would you like letters from the state in Spanish?",
+      "pdf_field": "form1[0].#subform[6].#field[10]",
+      "pdf_values": {
+        "yes": "1",
+        "no": "Off"
+      },
+      "group": "About you"
+    },
+    {
+      "id": "ssn_last4",
+      "label": "Last 4 of SSN",
+      "type": "ssn_last4",
+      "question_hint": "What are the last four digits of your Social Security number? You can skip this; your caseworker will ask for the full number.",
+      "pdf_field": "form1[0].#subform[6].ApplicantsSocialSecurityNumber[0]",
+      "profile_key": "ssn_last4",
+      "validation": "^\\d{4}$",
+      "sensitive": true,
+      "group": "About you",
+      "max_length": 11
+    },
+    {
+      "id": "applicant_citizen",
+      "label": "U.S. citizen",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Are you a U.S. citizen?",
+      "pdf_field": "form1[0].#subform[6].RadioButtonList[1]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "About you"
+    },
+    {
+      "id": "applicant_wants_coverage",
+      "label": "Wants coverage for self",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Do you want medical coverage for yourself?",
+      "pdf_field": "form1[0].#subform[6].RadioButtonList[2]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "About you"
+    },
+    {
+      "id": "has_household_members",
+      "label": "Others in household",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Does anyone else live with you, like a spouse or children?",
+      "group": "Household"
+    },
+    {
+      "id": "member_name",
+      "label": "Household member's name",
+      "required": true,
+      "question_hint": "What is the full name of the next person who lives with you?",
+      "pdf_field": "form1[0].#subform[6].NameofApplicant[1]",
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household",
+      "max_length": 50
+    },
+    {
+      "id": "member_relationship",
+      "label": "Household member's relationship",
+      "question_hint": "How are they related to you?",
+      "pdf_field": "form1[0].#subform[6].TextField5[0]",
+      "profile_key": "household_members[0].relationship",
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household",
+      "max_length": 30
+    },
+    {
+      "id": "member_date_of_birth",
+      "label": "Household member's date of birth",
+      "type": "date",
+      "question_hint": "What is their date of birth?",
+      "pdf_field": "form1[0].#subform[6].TextField4[1]",
+      "profile_key": "household_members[0].date_of_birth",
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household",
+      "max_length": 20
+    },
+    {
+      "id": "member_wants_coverage",
+      "label": "Household member wants coverage",
+      "type": "yes_no",
+      "question_hint": "Do they want medical coverage too?",
+      "pdf_field": "form1[0].#subform[6].RadioButtonList[5]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "has_second_member",
+      "label": "A third person in household",
+      "type": "yes_no",
+      "question_hint": "Does anyone else live with you?",
+      "condition": {
+        "field": "has_household_members",
+        "equals": "yes"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "member2_name",
+      "label": "Second household member's name",
+      "required": true,
+      "question_hint": "What is their full name?",
+      "pdf_field": "form1[0].#subform[6].NameofApplicant[2]",
+      "condition": {
+        "field": "has_second_member",
+        "equals": "yes"
+      },
+      "group": "Household",
+      "max_length": 50
+    },
+    {
+      "id": "member2_relationship",
+      "label": "Second household member's relationship",
+      "question_hint": "How are they related to you?",
+      "pdf_field": "form1[0].#subform[6].TextField5[1]",
+      "profile_key": "household_members[1].relationship",
+      "condition": {
+        "field": "has_second_member",
+        "equals": "yes"
+      },
+      "group": "Household",
+      "max_length": 30
+    },
+    {
+      "id": "member2_date_of_birth",
+      "label": "Second household member's date of birth",
+      "type": "date",
+      "question_hint": "What is their date of birth?",
+      "pdf_field": "form1[0].#subform[6].TextField4[2]",
+      "profile_key": "household_members[1].date_of_birth",
+      "condition": {
+        "field": "has_second_member",
+        "equals": "yes"
+      },
+      "group": "Household",
+      "max_length": 20
+    },
+    {
+      "id": "member2_wants_coverage",
+      "label": "Second household member wants coverage",
+      "type": "yes_no",
+      "question_hint": "Do they want medical coverage too?",
+      "pdf_field": "form1[0].#subform[6].RadioButtonList[8]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "condition": {
+        "field": "has_second_member",
+        "equals": "yes"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "disability_in_household",
+      "label": "Anyone blind or disabled",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Is anyone applying blind or living with a disability?",
+      "pdf_field": "form1[0].#subform[7].RadioButtonList[16]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "profile_key": "disability_in_household",
+      "group": "Health"
+    },
+    {
+      "id": "pregnant",
+      "label": "Pregnant recently",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Is anyone applying pregnant, or been pregnant in the last 3 months?",
+      "pdf_field": "form1[0].#subform[9].RadioButtonList[27]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "Health"
+    },
+    {
+      "id": "other_insurance",
+      "label": "Has other health insurance",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Does anyone applying have Medicare or other health insurance?",
+      "pdf_field": "form1[0].#subform[9].RadioButtonList[30]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "Health"
+    },
+    {
+      "id": "has_wages",
+      "label": "Has income from work",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Does anyone in your home get paid for working?",
+      "pdf_field": "form1[0].#subform[10].breastcancer[2]",
+      "pdf_values": {
+        "yes": "1",
+        "no": "Off"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "earner_name",
+      "label": "Who gets paid",
+      "required": true,
+      "question_hint": "Who in your home gets paid? Tell me one name.",
+      "pdf_field": "form1[0].#subform[10].nameofchild1listed[9]",
+      "profile_key": "full_name",
+      "condition": {
+        "field": "has_wages",
+        "equals": "yes"
+      },
+      "group": "Income",
+      "max_length": 50
+    },
+    {
+      "id": "employer",
+      "label": "Employer",
+      "required": true,
+      "question_hint": "Who do they work for?",
+      "pdf_field": "form1[0].#subform[10].TextField6[14]",
+      "profile_key": "employment.employer",
+      "condition": {
+        "field": "has_wages",
+        "equals": "yes"
+      },
+      "group": "Income",
+      "max_length": 50
+    },
+    {
+      "id": "gross_pay",
+      "label": "Pay per paycheck, before taxes",
+      "type": "money",
+      "required": true,
+      "question_hint": "About how much is each paycheck, before taxes?",
+      "pdf_field": "form1[0].#subform[10].TextField6[13]",
+      "profile_key": "employment.gross_pay",
+      "condition": {
+        "field": "has_wages",
+        "equals": "yes"
+      },
+      "group": "Income",
+      "max_length": 15
+    },
+    {
+      "id": "pay_frequency",
+      "label": "How often paid",
+      "required": true,
+      "question_hint": "How often do they get paid: every week, every 2 weeks, twice a month, or once a month?",
+      "pdf_field": "form1[0].#subform[10].TextField6[17]",
+      "profile_key": "employment.pay_frequency",
+      "condition": {
+        "field": "has_wages",
+        "equals": "yes"
+      },
+      "group": "Income",
+      "max_length": 15
+    },
+    {
+      "id": "gets_child_support",
+      "label": "Gets child support",
+      "type": "yes_no",
+      "question_hint": "Does anyone in your home get child support?",
+      "pdf_field": "form1[0].#subform[10].cervicalcancer[3]",
+      "pdf_values": {
+        "yes": "1",
+        "no": "Off"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "pays_child_care",
+      "label": "Pays for child care to work",
+      "type": "yes_no",
+      "question_hint": "Do you pay for child care so you can work?",
+      "pdf_field": "form1[0].#subform[10].RadioButtonList[37]",
+      "pdf_values": {
+        "yes": "0",
+        "no": "1"
+      },
+      "group": "Expenses"
+    },
+    {
+      "id": "child_care_cost",
+      "label": "Child care per month",
+      "type": "money",
+      "question_hint": "About how much do you pay for child care each month?",
+      "pdf_field": "form1[0].#subform[10].nameofchild1listed[15]",
+      "condition": {
+        "field": "pays_child_care",
+        "equals": "yes"
+      },
+      "group": "Expenses",
+      "max_length": 50
+    }
+  ]
+}

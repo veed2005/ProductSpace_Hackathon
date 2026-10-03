@@ -1,0 +1,250 @@
+{
+  "form_id": "il_school_meals",
+  "name": "Illinois Free and Reduced-Price School Meals Application",
+  "reviewed": true,
+  "fields": [
+    {
+      "id": "applicant_name",
+      "label": "Your full name",
+      "required": true,
+      "question_hint": "What is your full name?",
+      "pdf_field": "Household Member Name Row1",
+      "profile_key": "full_name",
+      "group": "Household"
+    },
+    {
+      "id": "gets_snap_or_tanf",
+      "label": "Gets SNAP or TANF",
+      "type": "yes_no",
+      "required": true,
+      "question_hint": "Does anyone in your home get SNAP or TANF right now?",
+      "group": "Household"
+    },
+    {
+      "id": "snap_case_number",
+      "label": "SNAP or TANF case number",
+      "required": true,
+      "question_hint": "What is your SNAP or TANF case number? It is on your benefits letter, up to 9 letters or numbers.",
+      "pdf_field": "Case Number Row1",
+      "profile_key": "case_numbers.snap",
+      "condition": {
+        "field": "gets_snap_or_tanf",
+        "equals": "yes"
+      },
+      "group": "Household",
+      "max_length": 9,
+      "validation": "^[A-Za-z0-9-]{1,9}$"
+    },
+    {
+      "id": "child_name",
+      "label": "Child's full name",
+      "required": true,
+      "question_hint": "What is the full name of your child who goes to school?",
+      "pdf_field": "Household Member Name Row2",
+      "group": "Children"
+    },
+    {
+      "id": "child_school",
+      "label": "Child's school",
+      "required": true,
+      "question_hint": "What school do they go to?",
+      "pdf_field": "School Name Row2",
+      "profile_key": "household_members[0].school",
+      "group": "Children"
+    },
+    {
+      "id": "child_grade",
+      "label": "Child's grade",
+      "question_hint": "What grade are they in?",
+      "pdf_field": "Grade Row2",
+      "group": "Children"
+    },
+    {
+      "id": "child_foster",
+      "label": "Foster child",
+      "type": "yes_no",
+      "question_hint": "Is this child a foster child placed with you by an agency or court?",
+      "pdf_field": "Check Box Row2",
+      "pdf_values": {
+        "yes": "Yes",
+        "no": "Off"
+      },
+      "group": "Children"
+    },
+    {
+      "id": "has_second_child",
+      "label": "Another child in school",
+      "type": "yes_no",
+      "question_hint": "Do you have another child in school?",
+      "group": "Children"
+    },
+    {
+      "id": "child2_name",
+      "label": "Second child's full name",
+      "required": true,
+      "question_hint": "What is that child's full name?",
+      "pdf_field": "Household Member Name Row3",
+      "condition": {
+        "field": "has_second_child",
+        "equals": "yes"
+      },
+      "group": "Children"
+    },
+    {
+      "id": "child2_school",
+      "label": "Second child's school",
+      "question_hint": "What school do they go to?",
+      "pdf_field": "School Name Row3",
+      "profile_key": "household_members[1].school",
+      "condition": {
+        "field": "has_second_child",
+        "equals": "yes"
+      },
+      "group": "Children"
+    },
+    {
+      "id": "child2_grade",
+      "label": "Second child's grade",
+      "question_hint": "What grade are they in?",
+      "pdf_field": "Grade Row3",
+      "condition": {
+        "field": "has_second_child",
+        "equals": "yes"
+      },
+      "group": "Children"
+    },
+    {
+      "id": "homeless",
+      "label": "Homeless",
+      "type": "yes_no",
+      "question_hint": "Are you without a stable place to live right now?",
+      "pdf_field": "Check Box.1",
+      "pdf_values": {
+        "yes": "Yes",
+        "no": "Off"
+      },
+      "group": "Household"
+    },
+    {
+      "id": "earner_name",
+      "label": "Who has a job",
+      "required": true,
+      "question_hint": "Who in your home earns money from a job? Tell me one name.",
+      "pdf_field": "Name of Household Member who Receives IncomeRow1",
+      "profile_key": "full_name",
+      "condition": {
+        "field": "gets_snap_or_tanf",
+        "equals": "no"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "earnings",
+      "label": "Pay from work, before taxes",
+      "type": "money",
+      "required": true,
+      "question_hint": "About how much is their pay each time, before taxes? Round to whole dollars.",
+      "pdf_field": "Amount",
+      "profile_key": "employment.gross_pay",
+      "condition": {
+        "field": "gets_snap_or_tanf",
+        "equals": "no"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "earnings_frequency",
+      "label": "How often paid",
+      "type": "choice",
+      "required": true,
+      "question_hint": "How often do they get paid: every week, every 2 weeks, twice a month, or once a month?",
+      "pdf_field": "How Often? Row1.1",
+      "options": [
+        "Every Week",
+        "Every 2 Weeks",
+        "Twice a Month",
+        "Once a Month",
+        "Annually"
+      ],
+      "condition": {
+        "field": "gets_snap_or_tanf",
+        "equals": "no"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "support_income",
+      "label": "Child support, alimony or welfare",
+      "type": "money",
+      "question_hint": "Do they get child support, alimony or welfare? If yes, how much each time? Say zero if none.",
+      "pdf_field": "Amount_2",
+      "condition": {
+        "field": "gets_snap_or_tanf",
+        "equals": "no"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "support_frequency",
+      "label": "How often support comes",
+      "type": "choice",
+      "question_hint": "How often does that money come?",
+      "pdf_field": "How Often? Row1.2",
+      "options": [
+        "Every Week",
+        "Every 2 Weeks",
+        "Twice a Month",
+        "Once a Month",
+        "Annually"
+      ],
+      "condition": {
+        "field": "gets_snap_or_tanf",
+        "equals": "no"
+      },
+      "group": "Income"
+    },
+    {
+      "id": "ssn_last4",
+      "label": "Last 4 of SSN",
+      "type": "ssn_last4",
+      "question_hint": "What are the last four digits of your Social Security number? If you don't have one, just say so.",
+      "pdf_field": "Last 4 SSN",
+      "profile_key": "ssn_last4",
+      "condition": {
+        "field": "gets_snap_or_tanf",
+        "equals": "no"
+      },
+      "validation": "^\\d{4}$",
+      "sensitive": true,
+      "group": "Signature",
+      "max_length": 4
+    },
+    {
+      "id": "signer_name",
+      "label": "Adult signing",
+      "required": true,
+      "question_hint": "What is the full name of the adult signing this application?",
+      "pdf_field": "Name of Adult Household Member",
+      "profile_key": "full_name",
+      "group": "Signature"
+    },
+    {
+      "id": "home_phone",
+      "label": "Home phone",
+      "type": "phone",
+      "question_hint": "What is the best phone number to reach you?",
+      "pdf_field": "Home Telephone",
+      "profile_key": "phone",
+      "group": "Contact"
+    },
+    {
+      "id": "home_address",
+      "label": "Home address",
+      "type": "address",
+      "question_hint": "What is your home address, with city and zip code?",
+      "pdf_field": "Home Address",
+      "profile_key": "address",
+      "group": "Contact"
+    }
+  ]
+}
