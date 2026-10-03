@@ -40,13 +40,15 @@ class BrowserConnection:
         self._pending: dict[str, asyncio.Future] = {}
         self._cache: Optional[PageState] = None
         self._on_close: list[Callable[[BrowserConnection], None]] = []
+        self._send_lock = asyncio.Lock()
 
     # ------------------------------------------------------------ transport
 
     async def send(self, message: dict) -> None:
         if self.closed or self.ws is None:
             raise BrowserGone(self.installation_id)
-        await self.ws.send_json(message)
+        async with self._send_lock:
+            await self.ws.send_json(message)
 
     def handle(self, msg: dict) -> None:
         """A message from the extension (after hello)."""
@@ -136,12 +138,23 @@ class PageUnavailable(Exception):
 class BrowserHub:
     def __init__(self) -> None:
         self._by_id: dict[str, BrowserConnection] = {}
+        self._listeners: list[Callable[[BrowserConnection], None]] = []
+
+    def on_connect(self, callback: Callable[[BrowserConnection], None]) -> Callable[[], None]:
+        """Call `callback(conn)` when a browser connects; returns a function that unsubscribes."""
+        self._listeners.append(callback)
+        return lambda: self._listeners.remove(callback) if callback in self._listeners else None
 
     def register(self, conn: BrowserConnection) -> None:
         old = self._by_id.get(conn.installation_id)
         if old is not None and old is not conn:
             old.close()  # the same installation reconnected; the old socket is dead or about to be
         self._by_id[conn.installation_id] = conn
+        for callback in list(self._listeners):
+            try:
+                callback(conn)
+            except Exception:
+                log.exception("browser connect listener failed")
         publish("browser", kind="connected", installation_id=conn.installation_id, profile_id=conn.profile_id,
                 tab=conn.public_tab())
 

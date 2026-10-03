@@ -1,0 +1,506 @@
+"""The browser-agent loop: caller goal + live page -> model decision -> checked action -> new page.
+
+    caller speaks -> handle() -> (background) _loop():
+        page = browser.page_state()          # cached until the page changes
+        decision = model(goal, conversation, steps so far, page)
+        ask_user  -> say the question, wait for the caller
+        confirm   -> store the exact step + page fingerprint server-side, ask, wait for "yes"
+        done      -> only if the evidence text is on a fresh snapshot of the page
+        act       -> validate each step, run it in the browser, record the browser's result
+
+The model proposes; code validates, executes through the extension, and verifies. A consequential
+step runs only from the stored pending confirmation after the caller says yes, never from a later
+model decision. "Stop" cancels the loop immediately.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import time
+from typing import Awaitable, Callable, Optional, Protocol
+
+from fastapi.concurrency import run_in_threadpool
+
+from app.agent import store
+from app.agent.decision import Decision, Step
+from app.agent.policy import classify_reply, is_consequential, is_stop, page_fingerprint, validate_step
+from app.agent.prompts import CONFIRM_NUDGE, system_prompt
+from app.agent.render import page_text, site_name
+from app.browser.hub import BrowserConnection, BrowserGone, PageUnavailable
+from app.browser.protocol import ActionResult, PageState
+from app.browser.sanitize import mask
+from app.events import log_event
+from app.llm import client as llm
+
+log = logging.getLogger(__name__)
+
+MAX_DECISIONS = 16  # model calls per caller turn before checking in with the caller
+MAX_ERRORS = 3
+NARRATE_EVERY_S = 6.0
+FILLER_AFTER_S = 2.2
+CONFIRM_TTL_S = 300
+DECIDE_TIMEOUT_S = 30.0
+
+SAY = {
+    "en": {
+        "filler": "One moment.",
+        "stopped": "Okay, I stopped. Nothing else will happen unless you tell me.",
+        "declined": "Okay, I won't do that. Nothing was submitted. What would you like to do instead?",
+        "stale": "The page changed before I could finish, so I didn't press anything. Let me take another look.",
+        "gone": "I lost the connection to your browser. Make sure your computer is on and Chrome is open, then tell me when you're ready.",
+        "no_page": "I can't see a web page right now. Open the website you need in Chrome, then tell me when it's up.",
+        "error": "Sorry, something went wrong on my end. Could you say that again?",
+        "trouble": "I'm having trouble with this page. Could you tell me another way to do this, or try again in a moment?",
+        "long": "This is taking a while. Should I keep going?",
+        "confirm_q": "Should I go ahead?",
+        "press": "I'm ready to press {label}. Should I go ahead?",
+    },
+    "es": {
+        "filler": "Un momento.",
+        "stopped": "Listo, me detuve. No haré nada más hasta que me diga.",
+        "declined": "De acuerdo, no lo haré. No se envió nada. ¿Qué le gustaría hacer?",
+        "stale": "La página cambió antes de terminar, así que no presioné nada. Déjeme revisar de nuevo.",
+        "gone": "Perdí la conexión con su navegador. Asegúrese de que la computadora esté encendida y Chrome abierto, y avíseme.",
+        "no_page": "No veo ninguna página abierta. Abra el sitio que necesita en Chrome y avíseme.",
+        "error": "Perdón, algo salió mal. ¿Puede repetirlo?",
+        "trouble": "Tengo problemas con esta página. ¿Me dice otra forma de hacerlo, o lo intento de nuevo en un momento?",
+        "long": "Esto está tardando. ¿Sigo intentando?",
+        "confirm_q": "¿Lo hago?",
+        "press": "Estoy listo para presionar {label}. ¿Lo hago?",
+    },
+}
+
+
+class BrowserPort(Protocol):
+    async def page_state(self, *, fresh: bool = False) -> PageState: ...
+    async def act(self, step: Step, doc_id: str) -> ActionResult: ...
+    async def overlay(self, text: Optional[str]) -> None: ...
+
+
+class ConnectionPort:
+    """The real browser: a paired extension, pinned to the tab the task started in."""
+
+    def __init__(self, conn: BrowserConnection):
+        self.conn = conn
+        self.tab_id: Optional[int] = None
+
+    async def page_state(self, *, fresh: bool = False) -> PageState:
+        state = await self.conn.page_state(self.tab_id, fresh=fresh)
+        if self.tab_id is None:
+            self.tab_id = state.tab_id
+        return state
+
+    async def act(self, step: Step, doc_id: str) -> ActionResult:
+        result = await self.conn.act(step.action, tab_id=self.tab_id, doc_id=doc_id, element_id=step.element_id,
+                                     value=step.value)
+        if result.new_tab_id:
+            self.tab_id = result.new_tab_id
+        return result
+
+    async def overlay(self, text: Optional[str]) -> None:
+        try:
+            await self.conn.request("overlay", tab_id=self.tab_id, timeout=3, text=text)
+        except Exception:
+            pass  # cosmetic
+
+
+Decider = Callable[[str, list[dict]], Awaitable[Decision]]
+
+
+async def llm_decide(system: str, messages: list[dict]) -> Decision:
+    return await asyncio.wait_for(
+        run_in_threadpool(llm.structured, Decision, system=system, messages=messages, model=llm.agent_model(),
+                          max_tokens=900),
+        DECIDE_TIMEOUT_S)
+
+
+def _norm(text: str) -> str:
+    text = (text or "").replace("’", "'").replace("“", '"').replace("”", '"').casefold()
+    return " ".join(re.sub(r"[^\w\s'$#:.-]", " ", text).split()).strip(" .")
+
+
+class BrowserAgent:
+    def __init__(self, *, browser: BrowserPort, say: Callable[[str], Awaitable[None]], profile_id: int,
+                 installation_id: str, phone: str, channel: str = "voice", language: str = "en",
+                 decide: Optional[Decider] = None):
+        self.browser = browser
+        self._say_cb = say
+        self.profile_id = profile_id
+        self.installation_id = installation_id
+        self.phone = phone
+        self.channel = channel
+        self.language = language if language in SAY else "en"
+        self.decide = decide or llm_decide
+
+        self.task_id: Optional[int] = None
+        self.goal: Optional[str] = None
+        self.status = "idle"
+        self.pending: Optional[dict] = None
+        self.transcript: list[tuple[str, str]] = []
+        self.history: list[str] = []
+        self.notes: list[str] = []
+        self.inbox: list[str] = []
+        self.steps = 0
+        self.model_calls = 0
+        self.required_confirmation = False
+        self.confirmed_executed = False
+        self.last_spoke = 0.0
+        self._loop_task: Optional[asyncio.Task] = None
+        self._stopping = False
+
+    # ------------------------------------------------------------ public
+
+    @property
+    def busy(self) -> bool:
+        return self._loop_task is not None and not self._loop_task.done()
+
+    async def handle(self, text: str) -> None:
+        """One thing the caller said. Returns quickly; browser work continues in the background."""
+        text = (text or "").strip()
+        if not text:
+            return
+        if self.busy:
+            if is_stop(text):
+                await self.stop()
+            else:
+                self.inbox.append(text)  # the model sees it on its next look
+            return
+        self.transcript.append(("caller", text))
+        if self.pending and self.pending.get("type") == "confirm":
+            await self._resolve_confirmation(text)
+            return
+        if is_stop(text) and self.task_id and self.status in ("active", "waiting_input"):
+            await self.stop(spoken=True)
+            return
+        if self.task_id is None or self.status in ("completed", "failed"):
+            await self._new_task(text)
+        else:
+            self.pending = None
+            self._persist(status="active", pending={})
+        self._start(self._loop())
+
+    async def stop(self, *, spoken: bool = True) -> None:
+        """Halt immediately: cancel the loop, drop any pending confirmation, say so."""
+        self._stopping = True
+        task = self._loop_task
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._stopping = False
+        self.pending = None
+        self.required_confirmation = False
+        if self.task_id:
+            self._persist(status="stopped", pending={})
+            store.add_action(self.task_id, "stopped", reason="Caller said stop")
+        await self.browser.overlay(None)
+        if spoken:
+            await self._say(self._t("stopped"))
+
+    async def close(self) -> None:
+        """The call ended. Nothing more runs; an unfinished task is marked interrupted."""
+        task = self._loop_task
+        if task and not task.done():
+            task.cancel()
+        if self.task_id and self.status not in ("completed", "stopped", "failed"):
+            self._persist(status="interrupted", pending={})
+        try:
+            await self.browser.overlay(None)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------ helpers
+
+    def _t(self, key: str, **kw) -> str:
+        return SAY[self.language][key].format(**kw)
+
+    async def _say(self, text: str) -> None:
+        text = (text or "").strip()
+        if not text:
+            return
+        self.last_spoke = time.monotonic()
+        self.transcript.append(("you", text))
+        await self._say_cb(text)
+
+    def _persist(self, **fields) -> None:
+        if "status" in fields:
+            self.status = fields["status"]
+        if self.task_id:
+            store.update_task(self.task_id, **fields)
+
+    def _start(self, coro) -> None:
+        self._loop_task = asyncio.create_task(self._guarded(coro))
+
+    async def _guarded(self, coro) -> None:
+        filler = asyncio.create_task(self._filler(time.monotonic()))
+        try:
+            await coro
+        except asyncio.CancelledError:
+            raise
+        except BrowserGone:
+            self._persist(status="waiting_input")
+            await self._say(self._t("gone"))
+        except PageUnavailable as e:
+            log.info("page unavailable: %s", e)
+            self._persist(status="waiting_input")
+            await self._say(self._t("no_page"))
+        except Exception:
+            log.exception("browser agent failed")
+            self._persist(status="waiting_input")
+            await self._say(self._t("error"))
+        finally:
+            filler.cancel()
+
+    async def _filler(self, started: float) -> None:
+        await asyncio.sleep(FILLER_AFTER_S)
+        if self.last_spoke < started:
+            await self._say(self._t("filler"))
+
+    async def _new_task(self, goal: str) -> None:
+        page = None
+        try:
+            page = await self.browser.page_state()
+        except (PageUnavailable, BrowserGone):
+            pass
+        self.goal = goal
+        self.history, self.notes = [], []
+        self.steps = self.model_calls = 0
+        self.required_confirmation = self.confirmed_executed = False
+        self.task_id = store.create_task(profile_id=self.profile_id, installation_id=self.installation_id,
+                                         phone=self.phone, channel=self.channel, goal=goal,
+                                         site_name=site_name(page) if page else None)
+        self.status = "active"
+        await self.browser.overlay("Formline is helping on the phone. Say “stop” to pause.")
+
+    # ------------------------------------------------------------ the loop
+
+    async def _loop(self) -> None:
+        errors = 0
+        narrated = False
+        for _ in range(MAX_DECISIONS):
+            page = await self.browser.page_state()
+            decision = await self._decide(page)
+            kind = decision.kind
+
+            if kind == "ask_user":
+                self.pending = {"type": "question", "say": decision.say}
+                self._persist(status="waiting_input", pending=self.pending)
+                store.add_action(self.task_id, "ask", element_label=decision.say, reason=decision.reason)
+                await self._say(decision.say)
+                return
+
+            if kind == "blocked":
+                self._persist(status="waiting_input", pending={})
+                store.add_action(self.task_id, "blocked", element_label=decision.say, reason=decision.reason, ok=False)
+                await self._say(decision.say)
+                return
+
+            if kind == "done":
+                ok, why = await self._verify_done(decision)
+                if ok:
+                    store.add_action(self.task_id, "verified", element_label=decision.evidence, reason=decision.reason)
+                    self._persist(status="completed", pending={}, result=f"{decision.say} [page: {decision.evidence}]")
+                    log_event("browser_task_completed", profile_id=self.profile_id, channel=self.channel,
+                              steps=self.steps, model_calls=self.model_calls)
+                    await self.browser.overlay(None)
+                    await self._say(decision.say)
+                    return
+                store.add_action(self.task_id, "unverified", element_label=decision.evidence, ok=False, error=why)
+                self.notes.append(why)
+                errors += 1
+                if errors >= MAX_ERRORS:
+                    break
+                continue
+
+            if not decision.steps:
+                self.notes.append(f"kind={kind} needs at least one step")
+                errors += 1
+                continue
+
+            if kind == "confirm":
+                step = decision.steps[0]
+                err = validate_step(step, page)
+                if err:
+                    self.notes.append(f"Your confirm step was not accepted: {err}")
+                    errors += 1
+                    continue
+                await self._request_confirmation(step, page, decision.say, decision.reason)
+                return
+
+            # act
+            if decision.say and (not narrated or time.monotonic() - self.last_spoke > NARRATE_EVERY_S):
+                narrated = True
+                await self._say(decision.say)
+            for i, step in enumerate(decision.steps[:3]):
+                if i:
+                    page = await self.browser.page_state()
+                err = validate_step(step, page)
+                if err:
+                    self.notes.append(f"Step {step.action} [{step.element_id}] was not run: {err}")
+                    store.add_action(self.task_id, "rejected", element_label=step.element_id, ok=False, error=err,
+                                     reason=decision.reason)
+                    errors += 1
+                    break
+                if is_consequential(step, page):
+                    await self._confirm_flagged(step, page, decision)
+                    return
+                result = await self._execute(step, page, decision.reason)
+                if not result.success:
+                    self.notes.append(f"{step.action} [{step.element_id}] failed: {result.error}"
+                                      f"{' (' + result.detail + ')' if result.detail else ''}")
+                    errors += 1
+                    break
+                errors = 0
+                if result.page_changed and step.action in ("click", "press_enter", "go_back", "navigate"):
+                    break  # look at the new page before doing more
+            if errors >= MAX_ERRORS:
+                break
+        else:
+            self._persist(status="waiting_input")
+            await self._say(self._t("long"))
+            return
+        self._persist(status="waiting_input")
+        await self._say(self._t("trouble"))
+
+    async def _decide(self, page: PageState) -> Decision:
+        while self.inbox:
+            said = self.inbox.pop(0)
+            self.transcript.append(("caller", said))
+            self.notes.append(f"While you were working the caller said: {said!r}")
+        convo = "\n".join(f"{'Caller' if who == 'caller' else 'You'}: {text}" for who, text in self.transcript[-14:])
+        steps = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(self.history[-15:])) or "(none yet)"
+        notes = "\n".join(f"- {n}" for n in self.notes) or "(none)"
+        self.notes = []
+        user = (f"Caller's goal: {self.goal}\n\nConversation so far (most recent last):\n{convo}\n\n"
+                f"Steps you have taken in the browser:\n{steps}\n\nNotes for this turn:\n{notes}\n\n"
+                f"CURRENT PAGE:\n{page_text(page)}")
+        started = time.perf_counter()
+        try:
+            decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": user}])
+        except (asyncio.TimeoutError, ValueError) as e:
+            log.warning("agent decision failed once (%s); retrying", e)
+            decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": user}])
+        ms = round((time.perf_counter() - started) * 1000)
+        self.model_calls += 1
+        self._persist(model_calls=self.model_calls)
+        log_event("agent_decision", profile_id=self.profile_id, channel=self.channel, ms=ms, kind=decision.kind)
+        log.info("agent %s in %sms: %s | %s", decision.kind, ms,
+                 [(s.action, s.element_id, s.value) for s in decision.steps], decision.reason)
+        return decision
+
+    async def _execute(self, step: Step, page: PageState, reason: str) -> ActionResult:
+        el = page.control(step.element_id)
+        label = el.label if el else (step.value or step.action)
+        started = time.perf_counter()
+        result = await self.browser.act(step, page.doc_id)
+        ms = round((time.perf_counter() - started) * 1000)
+        shown = None
+        if step.action in ("type", "select", "navigate", "scroll") and step.value:
+            shown = mask(step.value)[:200]
+        store.add_action(self.task_id, step.action, element_label=label, value=shown, reason=reason,
+                         ok=result.success, error=result.error, url_before=result.url_before,
+                         url_after=result.url_after, page_changed=result.page_changed, latency_ms=ms)
+        self.steps += 1
+        self._persist(steps=self.steps, last_url=result.url_after or page.url)
+        outcome = "ok" if result.success else f"FAILED ({result.error})"
+        changed = ", page changed" if result.page_changed else ""
+        typed = f" = {shown!r}" if shown else ""
+        self.history.append(f"{step.action} [{step.element_id}] {label!r}{typed} -> {outcome}{changed}")
+        return result
+
+    async def _verify_done(self, decision: Decision) -> tuple[bool, str]:
+        evidence = _norm(decision.evidence or "")
+        if len(evidence) < 6:
+            return False, "done needs evidence: copy the exact text on the current page that shows success"
+        page = await self.browser.page_state(fresh=True)
+        hay = _norm(" \n ".join([page.title] + [f"{e.label} {e.value or ''}" for e in page.elements]))
+        if evidence not in hay:
+            return False, (f"Your evidence {decision.evidence!r} is not on the current page. Only use done when "
+                           "the page itself shows the goal was achieved, and quote it exactly.")
+        if self.required_confirmation and not self.confirmed_executed:
+            return False, ("The final step was never confirmed and run, so the goal can't be complete yet. "
+                           "Ask the caller to confirm the final step.")
+        return True, ""
+
+    # ------------------------------------------------------------ confirmation
+
+    async def _confirm_flagged(self, step: Step, page: PageState, decision: Decision) -> None:
+        """The model tried to act on a final button without asking. Get a proper summary, then ask."""
+        el = page.control(step.element_id)
+        self.notes.append(CONFIRM_NUDGE.format(label=el.label if el else step.element_id))
+        retry = await self._decide(page)
+        if (retry.kind == "confirm" and retry.steps and retry.steps[0].element_id == step.element_id
+                and retry.steps[0].action == step.action):
+            await self._request_confirmation(retry.steps[0], page, retry.say, retry.reason)
+        else:
+            await self._request_confirmation(step, page, self._t("press", label=el.label if el else "that"),
+                                             decision.reason)
+
+    async def _request_confirmation(self, step: Step, page: PageState, say: str, reason: str) -> None:
+        el = page.control(step.element_id)
+        say = (say or "").strip() or self._t("press", label=el.label if el else "that")
+        if not say.endswith("?"):
+            say = f"{say} {self._t('confirm_q')}"
+        self.pending = {"type": "confirm", "step": step.model_dump(), "label": el.label if el else None,
+                        "role": el.role if el else None, "doc_id": page.doc_id, "url": page.url,
+                        "fingerprint": page_fingerprint(page, step.element_id), "say": say,
+                        "created_at": time.time()}
+        self.required_confirmation = True
+        self._persist(status="waiting_confirmation", pending=self.pending)
+        store.add_action(self.task_id, "confirm_request", element_label=el.label if el else None, value=say,
+                         reason=reason)
+        await self.browser.overlay("Waiting for your OK on the phone…")
+        await self._say(say)
+
+    async def _resolve_confirmation(self, text: str) -> None:
+        pending = self.pending or {}
+        verdict = classify_reply(text)
+        if time.time() - pending.get("created_at", 0) > CONFIRM_TTL_S and verdict == "yes":
+            verdict = "no"  # too old to trust; ask again
+        if verdict == "yes":
+            self._start(self._run_confirmed(pending))
+            return
+        self.pending = None
+        self.required_confirmation = False
+        store.add_action(self.task_id, "declined", element_label=pending.get("label"),
+                         reason="Caller said no" if verdict == "no" else "Caller asked for something else")
+        await self.browser.overlay("Formline is helping on the phone. Say “stop” to pause.")
+        if verdict == "no":
+            self._persist(status="waiting_input", pending={})
+            await self._say(self._t("declined"))
+            return
+        self.notes.append("You asked the caller to confirm, but they said something else instead (see the "
+                          "conversation). Nothing was submitted. Do what they asked now.")
+        self._persist(status="active", pending={})
+        self._start(self._loop())
+
+    async def _run_confirmed(self, pending: dict) -> None:
+        """Run exactly the stored step, and only if the page is still what the caller agreed to."""
+        step = Step.model_validate(pending["step"])
+        page = await self.browser.page_state(fresh=True)
+        self.pending = None
+        if page_fingerprint(page, step.element_id) != pending.get("fingerprint"):
+            store.add_action(self.task_id, "confirm_stale", element_label=pending.get("label"), ok=False,
+                             error="The page changed after the caller agreed; nothing was pressed")
+            self.notes.append("The page changed after the caller said yes, so the final step was NOT run. "
+                              "Look again; confirm again before any final step.")
+            self.required_confirmation = False
+            self._persist(status="active", pending={})
+            await self._say(self._t("stale"))
+            await self._loop()
+            return
+        store.add_action(self.task_id, "confirmed", element_label=pending.get("label"), reason="Caller said yes")
+        self._persist(status="active", pending={})
+        await self.browser.overlay("Formline is helping on the phone. Say “stop” to pause.")
+        result = await self._execute(step, page, "Caller confirmed")
+        if result.success:
+            self.confirmed_executed = True
+            self.notes.append("The caller said yes and the final step ran. Check the page for the result; use done "
+                              "only if the page shows it worked.")
+        else:
+            self.notes.append(f"The confirmed final step failed: {result.error} {result.detail or ''}")
+        await self._loop()

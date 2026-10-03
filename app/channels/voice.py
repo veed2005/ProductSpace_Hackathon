@@ -27,6 +27,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from twilio.twiml.voice_response import VoiceResponse
 
+from app.agent.call import CallController
 from app.channels.messaging import signature_ok
 from app.channels.outbound import send_sms
 from app.config import get_settings
@@ -186,10 +187,15 @@ class VoiceCall:
         self._turn_lock = asyncio.Lock()
         self._background: set[asyncio.Task] = set()
         self.ended = False
+        # Set when the caller has a paired browser: the call drives their browser instead of the form brain.
+        self.controller: Optional[CallController] = None
+        self._prompt_at: Optional[float] = None
+        self._send_lock = asyncio.Lock()
 
     async def send(self, message: dict) -> None:
-        if not self.ended:
-            await self.ws.send_json(message)
+        async with self._send_lock:  # agent speech, filler and replies can come from different tasks
+            if not self.ended:
+                await self.ws.send_json(message)
 
     async def run(self) -> None:
         try:
@@ -200,6 +206,8 @@ class VoiceCall:
         finally:
             if self._dtmf_timer:
                 self._dtmf_timer.cancel()
+            if self.controller:
+                await self.controller.close()
 
     async def handle(self, msg: dict) -> None:
         kind = msg.get("type")
@@ -208,10 +216,19 @@ class VoiceCall:
             self.lang = await run_in_threadpool(caller_language, self.phone)
             if get_settings().record_calls:
                 self._in_background(run_in_threadpool(start_recording, msg.get("callSid", "")))
-            await self.turn("", timed=False)  # let the brain greet (or say "welcome back")
+            self.controller = await CallController.for_caller(self.phone, channel="voice", say=self.say_text,
+                                                              end=self.end_call)
+            if self.controller:
+                await self.controller.start()
+            else:
+                await self.turn("", timed=False)  # let the brain greet (or say "welcome back")
         elif kind == "prompt":
             if msg.get("last", True) and msg.get("voicePrompt", "").strip():
-                await self.turn(msg["voicePrompt"])
+                if self.controller:
+                    self._prompt_at = time.perf_counter()
+                    await self.controller.on_utterance(msg["voicePrompt"])  # returns at once; work continues
+                else:
+                    await self.turn(msg["voicePrompt"])
         elif kind == "dtmf":
             await self.digit(str(msg.get("digit", "")))
         elif kind == "interrupt":
@@ -238,8 +255,24 @@ class VoiceCall:
 
     async def flush_digits(self) -> None:
         digits, self.digits = self.digits, ""
-        if digits:
+        if digits and self.controller:
+            await self.controller.on_utterance(digits)
+        elif digits:
             await self.turn(digits)
+
+    async def say_text(self, text: str) -> None:
+        """Speak one line now (browser-agent calls send several per caller turn: status, question, result)."""
+        if self._prompt_at is not None:
+            log_event("voice_latency", phone=self.phone, channel="voice",
+                      ms=round((time.perf_counter() - self._prompt_at) * 1000))
+            self._prompt_at = None
+        self._last_spoken = text
+        await self.send({"type": "text", "token": text, "last": True})
+
+    async def end_call(self) -> None:
+        await asyncio.sleep(speech_seconds(getattr(self, "_last_spoken", "")))
+        await self.send({"type": "end"})
+        self.ended = True
 
     async def turn(self, text: str, *, timed: bool = True) -> None:
         async with self._turn_lock:
