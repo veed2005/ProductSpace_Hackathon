@@ -161,3 +161,13 @@ Format: decision, alternatives considered, why.
 - A second model call happens only when repairing the draft would drop more than a quarter of its questions; otherwise the instant repair wins, since a retry doubles the wait on stage.
 - `FORMLINE_INGEST_MODEL` (shared config, additive) picks a faster model for drafting without touching the strong model used for letters. Default stays the strong model until someone times both.
 - Not done: vision-based filling of flat (non-fillable) PDFs, the C5 stretch goal. Flat, XFA-only and password-protected PDFs get a specific error instead.
+
+**Twilio retries are deduplicated in memory by `MessageSid`, not in the database.**
+- Alternatives: a `processed_sid` table or a column on `Message`.
+- Why: retries arrive seconds apart, so a bounded in-memory set catches them without a shared `models.py` change. A restart between a message and its retry could double-process it; that's acceptable for a demo.
+
+**A bad or missing Twilio signature gets a bare 403; every other failure gets a 200 with an apology text.**
+- Why: a forged request shouldn't trigger a reply or reveal anything, while a real person must never be left with silence because the brain or a media download failed. A failed photo download is skipped (the turn still runs) rather than failing the whole message.
+
+**Tests run with Twilio credentials blanked and signature validation off (`tests/conftest.py`).**
+- Why: real credentials in a developer's `.env` must never make a test send a real text, and other lanes' tests post unsigned webhooks. `tests/test_channels_messaging.py` turns validation back on to test it.
