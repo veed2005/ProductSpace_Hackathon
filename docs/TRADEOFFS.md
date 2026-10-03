@@ -64,3 +64,7 @@ Format: decision, alternatives considered, why.
 **Transcript hides inbound replies that are just 4 digits.**
 - Alternatives: a `sensitive` flag on each logged message, set by the brain.
 - Why: PINs and SSN last-4 are typed as bare digits, and this needs no cross-lane change. It misses longer messages like "my pin is 1234". A per-message flag from Lane A would be exact; we can add it later.
+
+**"Forget me" hard-deletes the person's data but keeps anonymized metrics events.**
+- Alternatives: soft delete (a `deleted_at` flag); delete metrics events too.
+- Why: a deletion the person asked for should be real, including their filled PDFs and letter photos. Metrics events keep only numbers (durations, counts) once identity is stripped, so the aggregate metrics stay honest. On a shared phone, transcript lines that were never tied to anyone are kept while another profile remains, because they may belong to that person.

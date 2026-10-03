@@ -15,10 +15,11 @@ is tracked per top-level fact: updating `address.city` re-confirms the whole add
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from sqlmodel import delete, select
+from sqlmodel import select
 
 from app.db import session_scope
 from app.events import log_activity, publish
@@ -78,6 +79,16 @@ CANONICAL_KEYS: dict[str, KeySpec] = {
                             ("snap", "medicaid", "tanf", "school_meals", "other")),
     "ssn_last4": KeySpec("Last 4 digits of SSN (never the full number)", None, sensitive=True,
                          value_hint="4-digit string"),
+}
+
+# Short labels for read-backs and the dashboard.
+FACT_LABELS: dict[str, str] = {
+    "name": "Name", "date_of_birth": "Date of birth", "phone": "Phone", "email": "Email",
+    "preferred_language": "Language", "address": "Home address", "mailing_address": "Mailing address",
+    "household_size": "Household size", "household_members": "Household members", "employment": "Job",
+    "monthly_income": "Monthly income", "other_income": "Other income", "housing_cost": "Rent / mortgage",
+    "utilities": "Utilities", "disability_in_household": "Disability in household",
+    "case_numbers": "Case numbers", "ssn_last4": "SSN (last 4)",
 }
 
 # Read/write aliases that map onto real keys.
@@ -344,20 +355,109 @@ def mask(value: Any) -> str:
 
 # ---------------------------------------------------------------- forget
 
-def forget_profile(profile_id: int) -> None:
-    """'Forget me': delete the person's facts and profile. Caller confirms first."""
+@dataclass
+class ForgetResult:
+    facts: int = 0
+    tasks: int = 0
+    documents: int = 0
+    messages: int = 0
+    reminders: int = 0
+    files: int = 0
+
+    def summary(self) -> str:
+        parts = [(self.tasks, "form"), (self.documents, "document"), (self.facts, "saved detail")]
+        said = [f"{n} {word}{'' if n == 1 else 's'}" for n, word in parts if n]
+        return "Deleted " + (", ".join(said) if said else "your profile") + "."
+
+
+def _remove_file(path: Optional[str]) -> bool:
+    """Delete a file only if it lives under the data directory."""
+    if not path:
+        return False
+    from app.config import get_settings
+
+    data_dir = get_settings().data_dir.resolve()
+    target = Path(path).resolve()
+    if data_dir in target.parents and target.is_file():
+        target.unlink()
+        return True
+    return False
+
+
+def forget_profile(profile_id: int) -> ForgetResult:
+    """'Forget me': permanently delete everything about this person. Caller confirms first.
+
+    Deletes facts, tasks (and filled PDFs), documents (and photos), reminders, activity, and their
+    transcript. Metrics events are kept for aggregate numbers but stripped of identity. Other
+    people sharing the phone are untouched; transcript lines not yet tied to anyone on a shared
+    phone are kept unless this was the phone's last profile.
+    """
+    from app.models import Activity, Document, Event, Message, Reminder, Task
+
+    result = ForgetResult()
     with session_scope() as s:
-        s.exec(delete(ProfileFact).where(ProfileFact.profile_id == profile_id))
-        for sess in s.exec(select(Session).where(Session.profile_id == profile_id)).all():
-            sess.profile_id = None
-            sess.active_task_id = None
-            s.add(sess)
-        # TODO(Lane D, Phase D3): also delete/anonymize tasks, documents, messages for this profile.
         profile = s.get(Profile, profile_id)
-        if profile:
-            s.delete(profile)
+        if profile is None:
+            return result
+        phone = profile.phone
+        others = s.exec(select(Profile).where(Profile.phone == phone, Profile.id != profile_id)).all()
+        task_ids = [t.id for t in s.exec(select(Task).where(Task.profile_id == profile_id)).all()]
+
+        # 1. Detach the session (it may point at this person and their active task).
+        for sess in s.exec(select(Session).where(Session.phone == phone)).all():
+            if sess.profile_id == profile_id or sess.active_task_id in task_ids:
+                if others:
+                    sess.profile_id, sess.active_task_id = None, None
+                    sess.state, sess.pending, sess.pin_verified_at = "new", {}, None
+                    s.add(sess)
+                else:
+                    s.delete(sess)
         s.commit()
-    log_activity("profile_deleted", "Deleted a profile at the person's request")
+
+        # 2. Rows that reference tasks, documents, or the profile.
+        mine = (Message.profile_id == profile_id) | (Message.task_id.in_(task_ids))
+        if not others:  # last profile on this phone: also its not-yet-identified lines
+            mine = mine | ((Message.phone == phone) & (Message.profile_id.is_(None)))
+        msgs = s.exec(select(Message).where(mine)).all()
+        result.messages = len(msgs)
+        for m in msgs:
+            s.delete(m)
+        for r in s.exec(select(Reminder).where(Reminder.profile_id == profile_id)).all():
+            result.reminders += 1
+            s.delete(r)
+        for a in s.exec(select(Activity).where(
+                (Activity.profile_id == profile_id) | (Activity.task_id.in_(task_ids)))).all():
+            s.delete(a)
+        for e in s.exec(select(Event).where(
+                (Event.profile_id == profile_id) | (Event.task_id.in_(task_ids)))).all():
+            e.profile_id, e.task_id, e.phone = None, None, None
+            s.add(e)
+        s.commit()
+
+        # 3. Tasks, then documents (tasks reference documents), with their files.
+        for t in s.exec(select(Task).where(Task.profile_id == profile_id)).all():
+            result.tasks += 1
+            result.files += _remove_file(t.output_pdf_path)
+            s.delete(t)
+        s.commit()
+        for d in s.exec(select(Document).where(Document.profile_id == profile_id)).all():
+            result.documents += 1
+            result.files += sum(_remove_file(p) for p in d.media_paths)
+            s.delete(d)
+        s.commit()
+
+        # 4. Facts and the profile itself.
+        facts = s.exec(select(ProfileFact).where(ProfileFact.profile_id == profile_id)).all()
+        result.facts = len(facts)
+        for f in facts:
+            s.delete(f)
+        s.commit()  # separately: no ORM relationships, so one flush could delete the profile first
+        s.delete(profile)
+        s.commit()
+
+    log_activity("profile_deleted", "Deleted a profile and all its data at the person's request")
+    publish("profile_deleted", profile_id=profile_id)
+    return result
 
 
 def describe_keys() -> str:

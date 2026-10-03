@@ -20,7 +20,7 @@ from app.contracts import FormField, FormSchema
 from app.db import session_scope
 from app.engines import form_library
 from app.memory import profile as memory
-from app.models import Activity, Message, Profile, Session, Task
+from app.models import Activity, Document, Message, Profile, ProfileFact, Reminder, Session, Task
 
 router = APIRouter(prefix="/api")
 
@@ -161,6 +161,121 @@ def get_phone_task(phone: str) -> Optional[dict]:
     return task_view(task) if task else None
 
 
+# ---------------------------------------------------------------- profiles (memory view)
+
+SOURCE_LABELS = {"form": "From a form", "document": "From a letter", "conversation": "Said in conversation",
+                 "seed": "Demo data"}
+_FREQ = {"weekly": "a week", "biweekly": "every 2 weeks", "semimonthly": "twice a month", "monthly": "a month"}
+
+
+def _money(v: Any) -> str:
+    return f"${v:,.0f}" if isinstance(v, (int, float)) else str(v)
+
+
+def fact_display(key: str, value: Any) -> list[str]:
+    """One or more readable lines for a stored fact."""
+    if value is None or value == "" or value == [] or value == {}:
+        return ["—"]
+    if key == "household_members" and isinstance(value, list):
+        lines = []
+        for m in value:
+            if not isinstance(m, dict):
+                continue
+            who = " ".join(p for p in (m.get("first_name"), m.get("last_name")) if p) or "Unnamed"
+            extra = [m.get("relationship")]
+            if m.get("date_of_birth"):
+                try:
+                    born = datetime.strptime(m["date_of_birth"], "%Y-%m-%d")
+                    today = datetime.now()
+                    extra.append(f"age {today.year - born.year - ((today.month, today.day) < (born.month, born.day))}")
+                except ValueError:
+                    pass
+            if m.get("is_student"):
+                extra.append(f"student{' at ' + m['school'] if m.get('school') else ''}")
+            details = ", ".join(e for e in extra if e)
+            lines.append(f"{who} ({details})" if details else who)
+        return lines or ["—"]
+    if key == "employment" and isinstance(value, dict):
+        if value.get("status") and value.get("status") != "employed":
+            return [str(value["status"]).replace("_", " ").capitalize()]
+        pay = value.get("gross_pay")
+        line = " · ".join(p for p in (
+            value.get("employer"),
+            f"{_money(pay)} {_FREQ.get(value.get('pay_frequency'), '')}".strip() if pay is not None else None,
+            f"{value['hours_per_week']} h/week" if value.get("hours_per_week") else None,
+            "pay varies" if value.get("varies") else None,
+        ) if p)
+        return [line or "Employed"]
+    if key == "other_income" and isinstance(value, list):
+        return [f"{i.get('type', 'Income')}: {_money(i.get('monthly_amount'))}/month" for i in value if isinstance(i, dict)] or ["—"]
+    if key == "utilities" and isinstance(value, dict):
+        pays = [n for n, k in (("heating/cooling", "pays_heating_cooling"), ("electric", "pays_electric"),
+                               ("water", "pays_water"), ("phone", "pays_phone")) if value.get(k)]
+        line = "Pays " + ", ".join(pays) if pays else "No utilities"
+        if value.get("monthly_amount") is not None:
+            line += f" · {_money(value['monthly_amount'])}/month"
+        return [line]
+    if key == "case_numbers" and isinstance(value, dict):
+        names = {"snap": "SNAP", "medicaid": "Medicaid", "tanf": "TANF", "school_meals": "School meals"}
+        return [f"{names.get(k, k.title())}: {v}" for k, v in value.items() if v] or ["—"]
+    if key in ("monthly_income", "housing_cost"):
+        return [f"{_money(value)}/month"]
+    if key == "date_of_birth" and isinstance(value, str):
+        try:
+            d = datetime.strptime(value, "%Y-%m-%d")
+            return [f"{d:%b} {d.day}, {d.year}"]
+        except ValueError:
+            return [value]
+    if key == "phone":
+        return [mask_phone(str(value))]
+    if key == "preferred_language":
+        return [{"en": "English", "es": "Spanish"}.get(value, str(value))]
+    return [memory.format_value(key, value)]
+
+
+@router.get("/profiles/{profile_id}")
+def get_profile(profile_id: int) -> dict:
+    with session_scope() as s:
+        p = s.get(Profile, profile_id)
+        if p is None:
+            raise HTTPException(404, "profile not found")
+        rows = {f.key: f for f in s.exec(select(ProfileFact).where(ProfileFact.profile_id == profile_id)).all()}
+        acts = s.exec(select(Activity).where(Activity.profile_id == profile_id)
+                      .order_by(Activity.created_at.desc()).limit(8)).all()
+        n_docs = len(s.exec(select(Document.id).where(Document.profile_id == profile_id)).all())
+        tasks = s.exec(select(Task).where(Task.profile_id == profile_id).order_by(Task.started_at.desc())).all()
+        reminders = s.exec(select(Reminder).where(Reminder.profile_id == profile_id, Reminder.status == "pending")
+                           .order_by(Reminder.due_at)).all()
+    views = memory.get_facts(profile_id)
+    now = datetime.now(timezone.utc)
+    order = list(memory.CANONICAL_KEYS)
+    facts = []
+    for key in sorted(views, key=lambda k: order.index(k) if k in order else len(order)):
+        v, row = views[key], rows[key]
+        stale_in = None
+        if row.freshness_days is not None:
+            stale_in = row.freshness_days - (now - v.confirmed_at).days
+        facts.append({
+            "key": key, "label": memory.FACT_LABELS.get(key, key.replace("_", " ").capitalize()),
+            "lines": [memory.mask(v.value)] if v.sensitive else fact_display(key, v.value),
+            "sensitive": v.sensitive, "source": v.source_type,
+            "source_label": SOURCE_LABELS.get(v.source_type, v.source_type),
+            "confirmed_at": _iso(v.confirmed_at), "fresh": v.fresh, "stale_in_days": stale_in,
+        })
+    return {
+        "id": p.id, "name": p.display_name or "Unnamed", "phone_masked": mask_phone(p.phone),
+        "language": p.preferred_language, "pin_set": bool(p.pin_hash), "consent_at": _iso(p.consent_at),
+        "created_at": _iso(p.created_at),
+        "facts": facts,
+        "counts": {"facts": len(facts), "stale": sum(not f["fresh"] for f in facts),
+                   "forms_completed": sum(t.status == "completed" for t in tasks), "documents": n_docs},
+        "tasks": [{"id": t.id, "form_id": t.form_id, "status": t.status, "started_at": _iso(t.started_at)}
+                  for t in tasks[:5]],
+        "reminders": [{"id": r.id, "due_at": _iso(r.due_at), "message": r.message} for r in reminders],
+        "activity": [{"description": a.description, "at": _iso(a.created_at)} for a in acts],
+    }
+
+
 # ---------------------------------------------------------------- people + transcript
 
 @router.get("/people")
@@ -197,6 +312,8 @@ def people() -> list[dict]:
             out.append({
                 "phone": phone, "phone_masked": mask_phone(phone), "name": name,
                 "profile_count": len(mine), "language": language,
+                "profiles": [{"id": p.id, "name": p.display_name or "Unnamed"} for p in mine],
+                "active_profile_id": active,
                 "channel": sess.last_channel if sess else (last_msg.channel if last_msg else None),
                 "doing": doing, "task_id": task.id if task else None,
                 "task_status": task.status if task else None,

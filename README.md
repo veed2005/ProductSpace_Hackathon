@@ -74,6 +74,7 @@ docs/          TRADEOFFS.md, PRIVACY.md, DEMO_SCRIPT.md
 - [x] Team scaffolding: lane contracts and working stubs, sample form, simulator, CI
 - [x] D1: canonical profile keys, demo seed/reset
 - [x] D2: live dashboard v1 (people, transcript, fields by source, verification, PDF download)
+- [x] D3: full "forget me" deletion, Memory tab (facts with source and freshness)
 - [ ] Phase 1: brain + CLI simulator
 - [ ] Phase 2: SMS/MMS
 - [ ] Phase 3: document engine

@@ -108,3 +108,31 @@ def test_pdf_download(tmp_path):
         assert r.status_code == 200 and r.content.startswith(b"%PDF")
         assert c.get(f"/api/tasks/{missing}/pdf").status_code == 404
         assert c.get(f"/api/tasks/{task_id}").json()["has_pdf"] is True
+
+
+def test_profile_view_shows_facts_with_source_and_freshness():
+    seed_demo()
+    maria = identity.profiles_for_phone(PHONE)[0].id
+    with _client() as c:
+        p = c.get(f"/api/profiles/{maria}").json()
+        people = c.get("/api/people").json()
+        assert c.get("/api/profiles/9999").status_code == 404
+    facts = {f["key"]: f for f in p["facts"]}
+    assert facts["monthly_income"]["fresh"] is False and facts["monthly_income"]["lines"] == ["$1,300/month"]
+    assert facts["address"]["fresh"] is True
+    assert facts["case_numbers"]["source_label"] == "From a letter"
+    assert any("Luis Garcia (son" in line for line in facts["household_members"]["lines"])
+    assert "202" not in facts["phone"]["lines"][0]
+    assert p["counts"]["stale"] == 2 and p["counts"]["forms_completed"] == 1
+    assert p["pin_set"] and p["reminders"]
+    shared = next(x for x in people if x["phone"] == DemoPhones().shared)
+    assert {x["name"] for x in shared["profiles"]} == {"James", "Denise"}
+
+
+def test_profile_view_masks_sensitive_facts():
+    pid = identity.create_profile("+12025550160", display_name="Test").id
+    from app.memory import profile as memory
+    memory.set_value(pid, "ssn_last4", "6789", source_type="conversation")
+    with _client() as c:
+        p = c.get(f"/api/profiles/{pid}").json()
+    assert "6789" not in str(p)
