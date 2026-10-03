@@ -30,9 +30,9 @@ from app.agent import store
 from app.agent.decision import Decision, Step
 from app.agent.policy import classify_reply, is_consequential, is_stop, page_fingerprint, validate_step
 from app.agent.prompts import CONFIRM_NUDGE, system_prompt
-from app.agent.render import looks_loading, page_text, site_name
+from app.agent.render import looks_loading, page_text, site_name, tab_name, tabs_text
 from app.browser.hub import BrowserConnection, BrowserGone, PageUnavailable
-from app.browser.protocol import ActionResult, PageState
+from app.browser.protocol import ActionResult, PageState, TabInfo
 from app.browser.sanitize import mask
 from app.config import get_settings
 from app.events import log_event
@@ -62,6 +62,7 @@ SAY = {
         "press": "I'm ready to press {label}. Should I go ahead?",
         "remembered": "Got it. I'll remember that for next time.",
         "not_remembered": "Okay, I won't save it.",
+        "tab": "I'm on your {name} tab now.",
     },
     "es": {
         "filler": "Un momento.",
@@ -77,6 +78,7 @@ SAY = {
         "press": "Estoy listo para presionar {label}. ¿Lo hago?",
         "remembered": "Listo. Lo recordaré para la próxima vez.",
         "not_remembered": "De acuerdo, no lo guardaré.",
+        "tab": "Ahora estoy en la pestaña de {name}.",
     },
 }
 
@@ -88,20 +90,33 @@ class BrowserPort(Protocol):
 
 
 class ConnectionPort:
-    """The real browser: a paired extension, pinned to the tab the task started in."""
+    """The real browser: a paired extension. The agent works in one tab at a time: the one the task started
+    in, a tab its click opened, a tab the person switched to, or one it chose with switch_tab."""
 
     def __init__(self, conn: BrowserConnection):
         self.conn = conn
         self.tab_id: Optional[int] = None
         self._switched: Optional[str] = None
+        self._seen_active: Optional[int] = None  # the browser's active tab when we last looked
+        self._trail: list[int] = []  # tabs the agent was on before this one, oldest first ("previous" pops it)
+        self._handles: dict[int, str] = {}  # tab id -> "T1", "T2"...; a tab keeps its handle while it's open
+
+    def _move(self, tab_id: int) -> None:
+        if self.tab_id is not None and tab_id != self.tab_id:
+            self._trail.append(self.tab_id)
+        self.tab_id = tab_id
 
     async def page_state(self, *, fresh: bool = False) -> PageState:
-        # Follow the person: if they switched to another tab, that's the page now.
+        # Follow the person: if they switched to another tab, that's the page now. Only a *change* in the
+        # browser's active tab counts, so the report of a switch the agent made itself (which can arrive late)
+        # isn't mistaken for the person's.
         active = self.conn.tab.get("tab_id")
-        if active is not None and self.tab_id is not None and active != self.tab_id:
-            self.tab_id = active
-            self._switched = self.conn.tab.get("title") or "another tab"
-            fresh = True
+        if active is not None and active != self._seen_active:
+            self._seen_active = active
+            if self.tab_id is not None and active != self.tab_id:
+                self._move(active)
+                self._switched = self.conn.tab.get("title") or "another tab"
+                fresh = True
         state = await self.conn.page_state(self.tab_id, fresh=fresh)
         if self.tab_id is None:
             self.tab_id = state.tab_id
@@ -111,11 +126,56 @@ class ConnectionPort:
         switched, self._switched = self._switched, None
         return switched
 
+    async def tabs(self) -> list[TabInfo]:
+        """The tabs in the agent's window, each with a handle the model can name in switch_tab."""
+        tabs = await self.conn.tabs(self.tab_id)
+        for t in tabs:
+            t.handle = self._handles.setdefault(t.tab_id, f"T{len(self._handles) + 1}")
+            t.current = t.tab_id == self.tab_id
+        return tabs
+
     async def act(self, step: Step, doc_id: str) -> ActionResult:
+        if step.action == "switch_tab":
+            return await self._switch_tab((step.value or "").strip())
         result = await self.conn.act(step.action, tab_id=self.tab_id, doc_id=doc_id, element_id=step.element_id,
                                      value=step.value)
         if result.new_tab_id:
-            self.tab_id = result.new_tab_id
+            self._move(result.new_tab_id)
+        return result
+
+    async def _switch_tab(self, target: str) -> ActionResult:
+        def refuse(error: str, detail: str) -> ActionResult:
+            return ActionResult(success=False, action="switch_tab", error=error, detail=detail)
+
+        tabs = await self.tabs()
+        by_id = {t.tab_id: t for t in tabs}
+        here = by_id.get(self.tab_id)
+        if target.lower() == "previous":
+            while self._trail and not (self._trail[-1] in by_id and by_id[self._trail[-1]].switchable
+                                       and self._trail[-1] != self.tab_id):
+                self._trail.pop()  # closed since, or not a page Formline can use
+            if not self._trail:
+                return refuse("no_tab", "There is no earlier tab to go back to. Pick a tab from the tab list instead.")
+            tab = by_id[self._trail.pop()]
+        else:
+            tab = next((t for t in tabs if t.handle.lower() == target.lower()), None)
+            if tab is None:
+                closed = target.upper() in self._handles.values()
+                return refuse("no_tab", "That tab was closed." if closed else
+                              f"{target!r} is not in the tab list; use a handle from the current list.")
+            if tab.tab_id == self.tab_id:
+                return refuse("invalid_action", "You are already on that tab.")
+            if not tab.switchable:
+                return refuse("unsupported_page", "Formline can't work on that tab (it isn't a regular web page).")
+        result = await self.conn.switch_tab(self.tab_id, tab.tab_id)
+        if result.success:
+            self._move(tab.tab_id)
+            result.new_tab_id = tab.tab_id
+            result.page_changed = True
+            was, now = (tab_name(here) if here else "the last tab"), tab_name(tab)
+            if here and was == now:  # two tabs of one site: their titles tell them apart
+                was, now = repr(here.title), repr(tab.title)
+            result.detail = f"moved from {was} to {now}"
         return result
 
     async def overlay(self, text: Optional[str]) -> None:
@@ -491,6 +551,10 @@ class BrowserAgent:
                     errors += 1
                     break
                 errors = 0
+                if step.action == "switch_tab":
+                    # The agent changed what the person sees, so it says where it is now.
+                    await self._say(self._t("tab", name=site_name(await self._page())))
+                    break
                 if result.page_changed and step.action in ("click", "press_enter", "go_back", "navigate", "search"):
                     break  # look at the new page before doing more
             if errors >= MAX_ERRORS:
@@ -543,7 +607,10 @@ class BrowserAgent:
         shown = page_text(page, previous=self._last_seen)
         self._last_seen = page
         known = await run_in_threadpool(agent_memory.recall, self.profile_id)
-        user = (f"CURRENT PAGE:\n{shown}\nEND OF PAGE\n\n"
+        tabs = tabs_text(await self._tabs())
+        tab_list = (f"Tabs open in this browser window (titles only; you see a tab's page after switching to it):\n"
+                    f"{tabs}\n\n") if tabs else ""
+        user = (f"CURRENT PAGE:\n{shown}\nEND OF PAGE\n\n{tab_list}"
                 f"Caller's goal: {self.goal}\n\n"
                 f"What you remember about the caller (from earlier conversations):\n{known or '(nothing saved yet)'}\n\n"
                 f"Conversation so far (most recent last):\n{convo}\n\n"
@@ -583,6 +650,18 @@ class BrowserAgent:
         log.info("agent %s in %sms: %s | %s", decision.kind, ms,
                  [(s.action, s.element_id, s.value) for s in decision.steps], decision.reason)
         return decision
+
+    async def _tabs(self) -> list[TabInfo]:
+        """The window's tabs, if this browser can list them. Never fails a decision."""
+        if not hasattr(self.browser, "tabs"):
+            return []
+        try:
+            return await self.browser.tabs()
+        except BrowserGone:
+            raise
+        except Exception:
+            log.warning("couldn't list tabs", exc_info=True)
+            return []
 
     # ------------------------------------------------------------ memory
 
@@ -664,6 +743,8 @@ class BrowserAgent:
         self._done_steps.append((_page_key(page), step.action, key_what.strip().lower()))
         if step.action == "search":  # what the search routine did, in its own words
             label = result.detail or (f"search box {el.label!r}" if el else "the site search")
+        if step.action == "switch_tab":  # "moved from Riverbend to Maple County Public Library"
+            label = result.detail if result.success else f"tab {step.value}"
         ms = round((time.perf_counter() - started) * 1000)
         shown = None
         if step.action in ("type", "select", "navigate", "scroll", "search") and step.value:
@@ -678,6 +759,8 @@ class BrowserAgent:
         typed = f" = {shown!r}" if shown else ""
         if step.action == "search":
             self.history.append(f"search for {shown!r} -> {outcome}: {result.detail or 'no details'}")
+        elif step.action == "switch_tab":
+            self.history.append(f"switch_tab {step.value} -> {outcome}: {result.detail or 'no details'}")
         else:
             self.history.append(f"{step.action} [{step.element_id}] {label!r}{typed} -> {outcome}{changed}")
         return result

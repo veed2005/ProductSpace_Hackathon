@@ -17,8 +17,8 @@ from fastapi import WebSocket
 from fastapi.concurrency import run_in_threadpool
 
 from app.browser import pdf
-from app.browser.protocol import ActionResult, PageState, PdfDocument
-from app.browser.sanitize import sanitize_page
+from app.browser.protocol import ActionResult, PageState, PdfDocument, TabInfo
+from app.browser.sanitize import sanitize_page, sanitize_tab
 from app.events import publish
 
 log = logging.getLogger(__name__)
@@ -153,6 +153,23 @@ class BrowserConnection:
         if msg.get("ok"):
             return ActionResult.model_validate({"action": action, **(msg.get("data") or {})})
         return ActionResult(success=False, action=action, error=msg.get("error") or "failed",
+                            detail=msg.get("detail"))
+
+    async def tabs(self, tab_id: Optional[int] = None) -> list[TabInfo]:
+        """Every tab in the window `tab_id` is in, in tab-strip order: titles only, scrubbed like page text."""
+        msg = await self.request("list_tabs", tab_id=tab_id, timeout=5)
+        if not msg.get("ok"):
+            return []
+        return [sanitize_tab(TabInfo.model_validate(t)) for t in (msg.get("data") or {}).get("tabs", [])]
+
+    async def switch_tab(self, tab_id: Optional[int], target_tab_id: int) -> ActionResult:
+        """Bring another tab of the same window to the front. `new_tab_id` in the result is the page now."""
+        self._cache = None
+        msg = await self.request("switch_tab", tab_id=tab_id, target_tab_id=target_tab_id)
+        self._cache = None
+        if msg.get("ok"):
+            return ActionResult.model_validate({"action": "switch_tab", **(msg.get("data") or {})})
+        return ActionResult(success=False, action="switch_tab", error=msg.get("error") or "failed",
                             detail=msg.get("detail"))
 
     async def screenshot(self, tab_id: Optional[int] = None) -> Optional[str]:

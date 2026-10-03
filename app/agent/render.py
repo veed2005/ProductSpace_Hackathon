@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from app.browser.pdf import describe
-from app.browser.protocol import PageElement, PageState
+from app.browser.protocol import PageElement, PageState, TabInfo
 
 
 def _q(text: Optional[str]) -> str:
@@ -90,6 +90,25 @@ def page_text(state: PageState, previous: Optional[PageState] = None) -> str:
         head.append(describe(state.document))
     lines = [("+ " if i in new else "") + element_line(e) for i, e in enumerate(state.elements)]
     return "\n".join(head + [""] + lines)
+
+
+def tab_name(tab: TabInfo) -> str:
+    """What to call a tab out loud: its site's name, or its title when there's no usable address."""
+    if not tab.url:
+        return tab.title or "a browser page"
+    return site_name(PageState(doc_id="", url=tab.url, title=tab.title))
+
+
+def tabs_text(tabs: list[TabInfo]) -> str:
+    """The window's tab strip as the model reads it. Empty when there's only one tab (nothing to switch to)."""
+    if len(tabs) < 2:
+        return ""
+    lines = []
+    for t in tabs:
+        marks = [m for m in ("you are here" if t.current else "", "" if t.switchable else "can't be used") if m]
+        site = f"{tab_name(t)}: " if t.url else ""
+        lines.append(f"{t.handle} {site}{_q(t.title)}" + (f" ({', '.join(marks)})" if marks else ""))
+    return "\n".join(lines)
 
 
 _LOADING = re.compile(r"^(loading|please wait|cargando|espere)\b|^(processing|one moment|un momento)[\s.…!]*$|"

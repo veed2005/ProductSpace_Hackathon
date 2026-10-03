@@ -171,6 +171,12 @@ async def dev_command(body: DevCommand, request: Request) -> dict:
     if body.action == "screenshot":
         image = await conn.screenshot(body.tab_id)
         return {"ok": bool(image), "jpeg_base64_chars": len(image or "")}
+    if body.action == "list_tabs":
+        return {"tabs": [t.model_dump() for t in await conn.tabs(body.tab_id)]}
+    if body.action == "switch_tab":  # value: the target tab's id, from list_tabs
+        if not (body.value or "").isdigit():
+            raise HTTPException(400, "switch_tab needs the target tab id in value")
+        return (await conn.switch_tab(body.tab_id, int(body.value))).model_dump()
     result = await conn.act(body.action, tab_id=body.tab_id, doc_id=body.doc_id, element_id=body.element_id,
                             value=body.value)
     return result.model_dump()

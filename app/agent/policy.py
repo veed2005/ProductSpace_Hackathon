@@ -22,6 +22,7 @@ TEXT_ROLES = {"textbox", "searchbox", "combobox", "spinbutton"}
 TOGGLE_ROLES = {"checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"}
 SELECT_ROLES = {"select", "listbox"}
 SCROLL_VALUES = {"up", "down", "top", "bottom"}
+TAB_TARGET = re.compile(r"^(previous|T\d+)$", re.IGNORECASE)
 NEEDS_ELEMENT = {"click", "type", "clear", "select", "check", "uncheck", "press_enter", "focus"}
 
 
@@ -64,6 +65,9 @@ def validate_step(step: Step, page: PageState) -> Optional[str]:
     elif step.action == "scroll":
         if (step.value or "down").lower() not in SCROLL_VALUES:
             return "scroll value must be up, down, top or bottom"
+    elif step.action == "switch_tab":
+        if not TAB_TARGET.match((step.value or "").strip()):
+            return 'switch_tab value must be "previous" or a tab handle from the tab list, like T2'
     return None
 
 
@@ -115,12 +119,12 @@ def is_consequential(step: Step, page: PageState) -> bool:
 
 
 def page_fingerprint(page: PageState, element_id: Optional[str]) -> str:
-    """What the caller agreed to: this page, this element, the text on the page (a review page's summary
-    is the thing being agreed to), and every value in the form. If any of it changes before the caller's
+    """What the caller agreed to: this tab, this page, this element, the text on the page (a review page's
+    summary is the thing being agreed to), and every value in the form. If any of it changes before the caller's
     yes arrives, the stored action is not run and the agent looks again."""
     el = page.control(element_id)
     controls = [(e.role, e.label, e.value, e.checked, e.selected) for e in page.elements]
-    raw = repr((urlparse(page.url)._replace(query="").geturl(), page.doc_id,
+    raw = repr((page.tab_id, urlparse(page.url)._replace(query="").geturl(), page.doc_id,
                 (el.role, el.label) if el else None, controls))
     return hashlib.sha256(raw.encode()).hexdigest()
 

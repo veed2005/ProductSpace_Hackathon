@@ -101,7 +101,7 @@ Reset between rehearsals: the portal's footer has **Reset demo data**; the dashb
 | Dashboard | `app/dashboard/agent_api.py`, `static/agent.js` | Agent tab: browsers, live action feed, pending confirmation, call transcript, "what Formline sees". |
 | Demo sites | `demo_sites/` | Riverbend Health portal (5-step scheduling wizard), Maple County Library (multi-page renewals), privacy testbench. Fake data only. |
 
-The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `confirm` (the one final step, with a spoken summary), `done` (with quoted evidence), `answer` (a reply about the page or document, with quoted evidence; the conversation continues), or `blocked` (the person must do something at the computer). Actions: `search` (the site's own search, run end to end by the extension), `click, type, clear, select, check, uncheck, press_enter, scroll, go_back, focus`. Each look at the page marks what's new since the last look with `+`, so the agent can see what its action opened. Typing is key by key; the extension waits for animations and late-arriving suggestions before the next look; a text box counts as visible only if it's really open on screen. **There is no "run JavaScript" action, and no typing of web addresses.**
+The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `confirm` (the one final step, with a spoken summary), `done` (with quoted evidence), `answer` (a reply about the page or document, with quoted evidence; the conversation continues), or `blocked` (the person must do something at the computer). Actions: `search` (the site's own search, run end to end by the extension), `click, type, clear, select, check, uncheck, press_enter, scroll, go_back, focus`, and `switch_tab` (to `previous`, or to a tab from the window's tab list by its handle, like `T2`). Each look at the page marks what's new since the last look with `+`, so the agent can see what its action opened. Typing is key by key; the extension waits for animations and late-arriving suggestions before the next look; a text box counts as visible only if it's really open on screen. **There is no "run JavaScript" action, and no typing of web addresses.**
 
 **PDFs:** Chrome's PDF viewer is sealed off from other extensions (its frames can't be scripted and its text commands can't be reached), so the file itself is read. When a PDF tab opens, the content script immediately keeps a copy in that tab's memory, fetched from the page itself (same origin, with the person's own session; it leaves the browser only when the person asks about the document). The server extracts every page with PyMuPDF (`app/browser/pdf.py`), masking SSN- and card-shaped numbers. If there's no copy and the link has expired, the visible part of the viewer is captured instead and the agent is told that's all it can see. The whole text goes into the model's view of the page, first in the prompt so follow-up questions about the same document can reuse the provider's prompt cache.
 
@@ -113,6 +113,7 @@ The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `
 - **Success needs evidence.** `done` must quote text that is on a fresh snapshot of the page, and if a final step was confirmed it must have actually run.
 - **Stop** cancels the loop immediately, even mid-model-call.
 - **What leaves the browser:** a sanitized snapshot only. Password fields, hidden inputs, and fields that look like card numbers, SSNs, PINs or one-time codes are reported without values; SSN- and card-shaped numbers are masked in all text; query strings are dropped from URLs; cookies and storage are never read. The server scrubs again. Typing into secret fields is refused in the extension and in the policy.
+- **Other tabs:** during a browser task the model also gets the titles and site names of the other tabs in the same window (scrubbed like page text; no addresses, no page content). A tab's page is read only after the agent switches to it, and the agent says aloud which tab it moved to. It never opens or closes tabs, and tabs in other windows are out of reach.
 - **Page text is data.** The prompt says so, and the demo portal's inbox contains an injection attempt to test it.
 - **No security bypass.** CAPTCHAs, logins, MFA and verification codes are handed back to the person at the computer.
 - **Screenshots** of the visible tab go to the model when the caller asks a question, after a failed step, or when a page has almost no text, so it can see what the person sees. They can't be redacted the way page text is (an SSN visible on screen would be in the picture), so `FORMLINE_SCREENSHOTS=false` turns them off.
@@ -127,10 +128,11 @@ The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `
 | Click covered by something | The extension reports what's covering it; the model handles it (e.g. closes the dialog). |
 | Page still loading | The agent waits for loading text, `aria-busy`, or "Scheduling…"-style buttons to clear (up to ~6 s). |
 | Form validation error | Shown in the snapshot (`INVALID`, alert text); the model fixes it. |
-| Link opens a new tab | The extension follows it and the task continues there. |
+| Link opens a new tab | The extension follows it and the task continues there. "Go back" returns to the tab it came from (`switch_tab previous`); the new tab stays open. |
+| The caller names another tab ("go to my library tab") | The agent sees the titles of the tabs in the window, switches to the one meant, and says which tab it's on. Tabs that were closed, or aren't regular web pages, are refused with a reason the model can act on. |
 | PDF can't be read | Too big, password-protected, or a local file without "Allow access to file URLs": the agent says which, and how to fix it. |
 | PDF link expired | Read from the copy kept when the tab opened; without one, only the visible part, and the agent says so. |
-| The person switches tabs mid-task | The agent follows them to the new tab and is told it changed. |
+| The person switches tabs mid-task | The agent follows them to the new tab and is told it changed. A pending confirmation from the earlier tab is dropped, never run on the new one. |
 | A search box hidden behind an icon | The search routine opens it once and waits for it to finish opening (clicking again would close it). |
 | Enter doesn't submit (no form, or the site ignores it) | The search routine submits the form or clicks the search/Go button. |
 | Suggestions instead of results | Reported with their ids; the agent clicks the right one. |
@@ -165,7 +167,7 @@ Latest live results (2026-10-03, `gpt-5.4-mini`, simulated caller): golden demo 
 
 ## Known limits and next steps
 
-- Formline acts on the active tab of the most recently used browser; with several paired browsers it picks the most recently active one rather than asking.
+- Formline starts on the active tab of the most recently used browser and can move between the tabs of that window; with several paired browsers it picks the most recently active one rather than asking. Tabs in other windows can't be reached.
 - Custom widgets with no accessible name and no visible text can't be targeted yet; the screenshot fallback helps the model understand them but there is no click-by-coordinates action (deliberately).
 - Iframes (including cross-origin) aren't read.
 - PDFs over 10 MB, or past about 250,000 characters of text, are cut off; the agent says so.
