@@ -38,3 +38,18 @@ Format: decision, alternatives considered, why.
 
 **Server-side refusal fallback on for Opus/Sonnet 5.5 calls in `llm/client.py`.**
 - Why: if the strong model declines a document (for example a medical bill or court notice it misreads as sensitive), the API retries on another model in the same call instead of failing the person's request.
+
+## Lane D
+
+**Profile keys are paths into a small set of top-level facts (`address.city`, `household_members[0].first_name`), and freshness is tracked per top-level fact.**
+- Alternatives: one flat fact per form-field-sized value (`address_city`, `member1_first_name`); freshness per sub-field.
+- Why: forms split the same data differently (one "address" box vs. street/city/zip boxes; three household rows vs. five), and paths let every form map onto one shape. Re-confirming a whole address when one part changes matches how people answer ("yes, that's still my address").
+
+**`full_name` is a virtual key over `name.{first,middle,last}`.**
+- Why: some forms want one name box and others want three. Splitting "Ana Maria de la Cruz" by first/last token is imperfect for multi-word surnames; the read-back gives the person a chance to correct it.
+
+**Demo reset drops and recreates tables instead of deleting the SQLite file.**
+- Why: it works while the server is running, so the dashboard's "Reset demo" button can call the same function between rehearsals.
+
+**Seeded persona includes a completed first form 45 days ago, with income and employment deliberately stale.**
+- Why: the on-stage memory metric needs a "first form" baseline, and the stale values show the re-ask-with-hint behavior.
