@@ -23,8 +23,10 @@ from app.agent.render import site_name
 from app.agent.runner import BrowserAgent, ConnectionPort, Decider
 from app.browser import pairing
 from app.browser.hub import BrowserConnection, BrowserGone, PageUnavailable, hub
+from app.config import get_settings
 from app.core import identity
-from app.events import log_message
+from app.events import log_event, log_message
+from app.formcall import language as lang_mod
 
 log = logging.getLogger(__name__)
 
@@ -85,15 +87,19 @@ def spoken_digits(text: str) -> str:
 
 class CallController:
     def __init__(self, phone: str, *, channel: str, say: Callable[[str], Awaitable[None]],
-                 end: Optional[Callable[[], Awaitable[None]]] = None, decide: Optional[Decider] = None):
+                 end: Optional[Callable[[], Awaitable[None]]] = None, decide: Optional[Decider] = None,
+                 on_language: Optional[Callable[[str], Awaitable[None]]] = None):
         self.phone = phone
         self.channel = channel
         self._say_cb = say
         self._end = end
+        self._on_language = on_language  # voice: switch the call's speech voice before the next line
         self._decide = decide
         self.phase = "identify"
         self.profile = None
         self.language = "en"
+        self._heard_language = False  # the caller's own words on this call set self.language
+        self._saved_language: Optional[str] = None  # the selected profile's stored preference
         self.agent: Optional[BrowserAgent] = None
         self.conn: Optional[BrowserConnection] = None
         self._unsubscribe = hub.on_connect(self._browser_connected)
@@ -117,6 +123,7 @@ class CallController:
             log_message(self.phone, "in", self.channel, "[PIN]" if is_pin else first_text)
             if not is_pin:
                 self._deferred = first_text
+                await self._follow_language(first_text, None)
         profiles = await run_in_threadpool(pairing.paired_profiles, self.phone)
         sess = await run_in_threadpool(identity.get_session, self.phone)
         if len(profiles) == 1:
@@ -125,16 +132,21 @@ class CallController:
             await self._select(next(p for p in profiles if p.id == sess.profile_id))
         else:
             self.phase = "choose"
-            await self.say(TEXT["en"]["who"])
+            await self.say(self._t("who"))
         if is_pin and self.phase == "pin":
             await self._check_pin(first_text)
 
-    async def on_utterance(self, text: str) -> None:
+    async def on_utterance(self, text: str, *, hint: Optional[str] = None) -> None:
+        """`hint` is the speech recognizer's language tag for this utterance ('es-US'), if it reports one."""
         text = (text or "").strip()
         if not text or self._closed:
             return
         logged = "[PIN]" if self.phase == "pin" else text
         log_message(self.phone, "in", self.channel, logged, profile_id=self.profile.id if self.profile else None)
+        if self.phase != "pin":
+            await self._follow_language(text, hint)
+        elif len(spoken_digits(text)) != 4:  # not the PIN itself: a request said early. Digits get no say.
+            await self._follow_language(text, None)
         if self.phase == "choose":
             await self._choose(text)
         elif self.phase == "pin" and len(spoken_digits(text)) != 4 and not spoken_digits(text):
@@ -167,6 +179,37 @@ class CallController:
     def _t(self, key: str, **kw) -> str:
         return TEXT[self.language][key].format(**kw)
 
+    async def _follow_language(self, text: str, hint: Optional[str]) -> None:
+        """Answer in the language the caller speaks: an explicit request ("in Spanish, please"), clear words, or
+        the recognizer's tag when the words lean the same way. Short replies, names and addresses ("ok",
+        "Dr. Smith", "412 Elm Street") change nothing, whatever the recognizer tagged them."""
+        lang = lang_mod.requested_switch(text)
+        if not lang:
+            by_words, sure = lang_mod.detect(text)
+            hinted = lang_mod.from_hint(hint) if get_settings().voice_autodetect else None
+            lang = by_words if sure or (by_words == hinted and len(text.split()) >= 3) else None
+        if lang not in TEXT:
+            return
+        self._heard_language = True
+        if lang == self.language:
+            return
+        self.language = lang
+        if self.agent:
+            self.agent.language = lang
+        log_event("language_switch", profile_id=self.profile.id if self.profile else None, channel=self.channel,
+                  to=lang)
+        if self._on_language:
+            await self._on_language(lang)
+        await self._remember_language()
+
+    async def _remember_language(self) -> None:
+        """Save the language heard on this call as the person's preference, but only once the PIN has shown
+        it's really them: caller ID alone must not change what's stored."""
+        if (self.profile and self._heard_language and self.phase == "ready"
+                and self._saved_language != self.language):
+            await run_in_threadpool(identity.update_profile, self.profile.id, preferred_language=self.language)
+            self._saved_language = self.language
+
     async def _choose(self, text: str) -> None:
         profiles = await run_in_threadpool(pairing.paired_profiles, self.phone)
         match = await run_in_threadpool(identity.match_profile, self.phone, text)
@@ -174,11 +217,15 @@ class CallController:
             await self._select(match)
         else:
             names = ", ".join(p.display_name or "Unnamed" for p in profiles)
-            await self.say(TEXT["en"]["who_again"].format(names=names))
+            await self.say(self._t("who_again", names=names))
 
     async def _select(self, profile, *, quiet_pin: bool = False) -> None:
         self.profile = profile
-        self.language = profile.preferred_language if profile.preferred_language in TEXT else "en"
+        self._saved_language = profile.preferred_language
+        if not self._heard_language:  # otherwise they already spoke on this call: keep that language
+            self.language = profile.preferred_language if profile.preferred_language in TEXT else "en"
+        if self._on_language:  # a shared phone starts in English; speak this person's language from here
+            await self._on_language(self.language)
         sess = await run_in_threadpool(identity.get_session, self.phone)
         await run_in_threadpool(identity.select_profile, sess, profile.id)
         if not profile.pin_hash:
@@ -221,6 +268,7 @@ class CallController:
 
     async def _ready(self) -> None:
         self.phase = "ready"
+        await self._remember_language()
         await self._attach_browser(greet=True)
 
     def _pick_browser(self) -> Optional[BrowserConnection]:

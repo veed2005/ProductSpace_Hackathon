@@ -221,7 +221,7 @@ class VoiceCall:
             if get_settings().record_calls:
                 self._in_background(run_in_threadpool(start_recording, msg.get("callSid", "")))
             self.controller = await CallController.for_caller(self.phone, channel="voice", say=self.say_text,
-                                                              end=self.end_call)
+                                                              end=self.end_call, on_language=self.switch_language)
             if self.controller:
                 await self.controller.start()
             else:
@@ -230,7 +230,8 @@ class VoiceCall:
             if msg.get("last", True) and msg.get("voicePrompt", "").strip():
                 if self.controller:
                     self._prompt_at = time.perf_counter()
-                    await self.controller.on_utterance(msg["voicePrompt"])  # returns at once; work continues
+                    # returns at once; work continues
+                    await self.controller.on_utterance(msg["voicePrompt"], hint=msg.get("lang"))
                 else:
                     await self.turn(msg["voicePrompt"], hint=msg.get("lang"))
         elif kind == "dtmf":
@@ -316,14 +317,19 @@ class VoiceCall:
             log.exception("voice turn failed")
         return sorry
 
+    async def switch_language(self, lang: str) -> None:
+        """Speak (and, without autodetect, listen) in `lang` from the next line on."""
+        if lang not in LANG_TAGS or lang == self.lang:
+            return
+        tag = LANG_TAGS[lang]
+        switch = {"type": "language", "ttsLanguage": tag}
+        if not get_settings().voice_autodetect:  # with "multi" recognition, keep listening for both
+            switch["transcriptionLanguage"] = tag
+        await self.send(switch)
+        self.lang = lang
+
     async def speak(self, result: TurnResult) -> None:
-        if result.language in LANG_TAGS and result.language != self.lang:
-            tag = LANG_TAGS[result.language]
-            switch = {"type": "language", "ttsLanguage": tag}
-            if not get_settings().voice_autodetect:  # with "multi" recognition, keep listening for both
-                switch["transcriptionLanguage"] = tag
-            await self.send(switch)
-            self.lang = result.language
+        await self.switch_language(result.language)
         if result.reply.strip():
             await self.send({"type": "text", "token": result.reply, "last": True})
 

@@ -838,7 +838,8 @@ class FormCall:
             self.begin_review()
         elif not pending.get("read") and (_READ.search(t) or (verdict == "yes" and not _FINE.match(t))):
             notices_mod.set_status(row.id, "read_exact")
-            self.say("notice_read", quote=row.quote)
+            self.lines.append(lang_mod.quote(self.lang, "notice_read", row.quote, form_id=self.form_id,
+                                             cache_key=f"nq.{key}"))
             self.ask("notice_after_read", {**pending, "read": True})
         elif _FINE.match(t) or verdict in ("yes", "no"):
             notices_mod.set_status(row.id, "read_exact" if pending.get("read") else "acknowledged")
