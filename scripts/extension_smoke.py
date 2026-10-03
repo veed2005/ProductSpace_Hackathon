@@ -1,0 +1,105 @@
+"""Smoke test for the Chrome extension without any LLM: pair, read the portal, click and type by id.
+
+    uv run python scripts/extension_smoke.py [--headed]
+
+Checks priority 1 and the action protocol: the backend sees the page, stale ids are refused,
+password/hidden values never leave the browser, and actions report real page changes.
+"""
+
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from browser_harness import Server, launch_chromium, pair  # noqa: E402
+from playwright.sync_api import sync_playwright  # noqa: E402
+
+
+def find(state, role, text):
+    for e in state["elements"]:
+        if e["role"] == role and text.lower() in (e.get("label") or "").lower():
+            return e
+    raise AssertionError(f"no {role} {text!r} in snapshot:\n" + "\n".join(
+        f"  {x.get('id')} {x['role']} {x.get('label')!r}" for x in state["elements"]))
+
+
+def main() -> int:
+    headed = "--headed" in sys.argv
+    with Server(port=8766) as server, sync_playwright() as pw:
+        context, ext = launch_chromium(pw, headless=not headed)
+        try:
+            pair(context, ext, server.url, phone="+15550001111", name="Margaret", pin="4821")
+            print("paired; extension connected")
+
+            page = context.new_page()
+            page.goto(server.url + "/demo/riverbend/")
+            page.wait_for_selector("h1")
+            page.bring_to_front()
+            time.sleep(0.8)
+
+            s = server.command("get_page_state")
+            print(f"snapshot: {s['site_name']!r} {s['title']!r} {len(s['elements'])} items")
+            assert s["site_name"] == "Riverbend Health patient portal"
+            visits = find(s, "link", "Visits")
+            r = server.command("click", element_id=visits["id"], doc_id=s["doc_id"])
+            print("click Visits:", r)
+            assert r["success"] and r["page_changed"], r
+
+            s = server.command("get_page_state")
+            sched = find(s, "button", "Schedule an appointment")
+            r = server.command("click", element_id=sched["id"], doc_id=s["doc_id"])
+            assert r["success"], r
+            time.sleep(0.8)  # wizard step loads
+
+            s = server.command("get_page_state")
+            smith = find(s, "radio", "Alan Smith")
+            nxt = find(s, "button", "Next")
+            assert nxt["enabled"] is False, nxt
+            r = server.command("check", element_id=smith["id"], doc_id=s["doc_id"])
+            print("check Dr. Smith:", r)
+            assert r["success"], r
+            s = server.command("get_page_state")
+            assert find(s, "radio", "Alan Smith")["checked"] is True
+            assert find(s, "button", "Next")["enabled"] is True
+
+            stale = server.command("click", element_id=smith["id"], doc_id="zzzzz")
+            print("stale doc id:", stale)
+            assert not stale["success"] and stale["error"] == "stale_element"
+            missing = server.command("click", element_id="e9999", doc_id=s["doc_id"])
+            assert not missing["success"] and missing["error"] == "not_found", missing
+
+            r = server.command("click", element_id=find(s, "button", "Next")["id"], doc_id=s["doc_id"])
+            assert r["success"], r
+            time.sleep(0.8)
+            s = server.command("get_page_state")
+            reason = find(s, "textbox", "why you want")
+            r = server.command("type", element_id=reason["id"], doc_id=s["doc_id"], value="My knee has been hurting.")
+            print("type reason:", r)
+            assert r["success"] and r["value"] == "My knee has been hurting.", r
+            vtype = find(s, "select", "Visit type")
+            r = server.command("select", element_id=vtype["id"], doc_id=s["doc_id"], value="video")
+            assert r["success"] and r["value"] == "Video visit", r
+
+            # Privacy: a page with secrets.
+            page.goto(server.url + "/demo/testbench/secrets.html")
+            time.sleep(0.5)
+            s = server.command("get_page_state")
+            blob = str(s)
+            for secret in ("hunter2-secret", "tok_SECRET123", "4111", "123-45-6789"):
+                assert secret not in blob, f"{secret!r} leaked: {blob}"
+            pw_field = find(s, "password", "Password")
+            assert pw_field["value"] is None and pw_field["sensitive"]
+            r = server.command("type", element_id=pw_field["id"], doc_id=s["doc_id"], value="x")
+            assert not r["success"] and r["error"] == "blocked", r
+            print("privacy: password/hidden/card/SSN values withheld; typing into password refused")
+            print("\nEXTENSION SMOKE TEST PASSED")
+            return 0
+        except Exception:
+            print("--- server log ---\n" + server.tail())
+            raise
+        finally:
+            context.close()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

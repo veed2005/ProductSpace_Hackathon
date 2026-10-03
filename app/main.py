@@ -4,11 +4,13 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.concurrency import run_in_threadpool
 
 from app import reminders
+from app.browser import routes as browser
 from app.channels import messaging, voice
-from app.config import get_settings
+from app.config import ROOT_DIR, get_settings
 from app.contracts import TurnRequest, TurnResult
 from app.core.turn import handle_turn
 from app.dashboard import routes as dashboard
@@ -31,6 +33,9 @@ app = FastAPI(title="Formline", lifespan=lifespan)
 app.include_router(messaging.router)
 app.include_router(voice.router)
 app.include_router(dashboard.router)
+app.include_router(browser.router)
+# Fake websites the browser agent is demoed and tested on (fake data only).
+app.mount("/demo", StaticFiles(directory=ROOT_DIR / "demo_sites", html=True, check_dir=False), name="demo")
 
 
 @app.get("/health")

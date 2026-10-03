@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Formline</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <span class="mark">F</span>
+    <div>
+      <div class="name">Formline</div>
+      <div class="sub">Call the internet</div>
+    </div>
+  </header>
+
+  <!-- Paired: connection status -->
+  <section id="paired" hidden>
+    <div class="status" id="status"><span class="dot"></span><span id="status-text">Connecting…</span></div>
+    <p class="who">Paired with <b id="who-name"></b><br><span id="who-phone" class="muted"></span></p>
+    <p class="page muted" id="page"></p>
+    <p class="hint">Call Formline from your phone and say what you want to do on this page.</p>
+    <button class="link" id="unpair">Unpair this browser</button>
+  </section>
+
+  <!-- Step 1: phone number -->
+  <section id="step-phone" hidden>
+    <p>Pair this browser with the phone you'll call Formline from. It can be a cell phone or a landline.</p>
+    <label for="phone">Phone number</label>
+    <input id="phone" type="tel" placeholder="(217) 555-0104" autocomplete="tel">
+    <fieldset class="delivery">
+      <legend>How should we send your code?</legend>
+      <label><input type="radio" name="delivery" value="sms" checked> Text me</label>
+      <label><input type="radio" name="delivery" value="call"> Call me (landline)</label>
+    </fieldset>
+    <button id="send-code">Send code</button>
+    <details>
+      <summary>Server</summary>
+      <input id="server" type="url" placeholder="http://localhost:8000">
+    </details>
+  </section>
+
+  <!-- Step 2: code (+ name and PIN for a new number) -->
+  <section id="step-code" hidden>
+    <p id="code-help"></p>
+    <label for="code">6-digit code</label>
+    <input id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code">
+    <div id="profile-fields" hidden>
+      <label for="pname">Your first name</label>
+      <input id="pname" autocomplete="given-name">
+    </div>
+    <div id="pin-fields" hidden>
+      <label for="pin">Choose a 4-digit PIN</label>
+      <input id="pin" type="password" inputmode="numeric" maxlength="4">
+      <p class="muted small">You'll say or key this PIN on each call before Formline uses your browser.</p>
+    </div>
+    <div id="choose-fields" hidden>
+      <label for="choose">Who are you?</label>
+      <select id="choose"></select>
+    </div>
+    <button id="confirm">Pair</button>
+    <button class="link" id="restart">Start over</button>
+    <p class="muted small" id="dev-code" hidden></p>
+  </section>
+
+  <p class="error" id="error" hidden></p>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+:root { --blue: #1d4ed8; --ink: #0f172a; --muted: #64748b; --line: #e2e8f0; }
+* { box-sizing: border-box; }
+body { width: 320px; margin: 0; padding: 14px 16px 16px; font: 14px/1.45 system-ui, -apple-system, Segoe UI, sans-serif; color: var(--ink); background: #fff; }
+header { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+.mark { width: 34px; height: 34px; border-radius: 9px; background: var(--blue); color: #fff; font-weight: 800; font-size: 20px; display: grid; place-items: center; }
+.name { font-weight: 700; font-size: 16px; }
+.sub { color: var(--muted); font-size: 12px; }
+p { margin: 0 0 10px; }
+label { display: block; font-weight: 600; margin: 8px 0 4px; }
+input[type=tel], input[type=url], input:not([type]), input[type=password], select { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 15px; }
+#code { letter-spacing: 6px; font-size: 20px; text-align: center; }
+fieldset.delivery { border: 0; padding: 0; margin: 10px 0; }
+fieldset.delivery legend { font-weight: 600; margin-bottom: 4px; }
+fieldset.delivery label { font-weight: 400; display: flex; gap: 6px; align-items: center; margin: 2px 0; }
+button { width: 100%; margin-top: 12px; padding: 10px; border: 0; border-radius: 8px; background: var(--blue); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; }
+button:disabled { opacity: .6; cursor: default; }
+button.link { background: none; color: var(--muted); font-weight: 500; font-size: 13px; text-decoration: underline; padding: 4px; margin-top: 6px; }
+details { margin-top: 12px; color: var(--muted); font-size: 12px; }
+details input { margin-top: 6px; font-size: 13px; }
+.status { display: flex; gap: 10px; align-items: center; font-weight: 800; font-size: 20px; letter-spacing: .5px; padding: 12px; border-radius: 10px; background: #f1f5f9; margin-bottom: 12px; }
+.status .dot { width: 14px; height: 14px; border-radius: 50%; background: #94a3b8; }
+.status.connected { background: #dcfce7; color: #166534; }
+.status.connected .dot { background: #16a34a; }
+.status.disconnected, .status.unauthorized { background: #fee2e2; color: #991b1b; }
+.status.disconnected .dot, .status.unauthorized .dot { background: #dc2626; }
+.status.connecting { background: #fef9c3; color: #854d0e; }
+.status.connecting .dot { background: #ca8a04; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.page { font-size: 13px; word-break: break-word; }
+.hint { background: #eff6ff; border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.error { color: #b91c1c; font-weight: 600; margin-top: 10px; }
