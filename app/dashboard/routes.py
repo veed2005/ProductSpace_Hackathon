@@ -3,7 +3,7 @@
 GET /dashboard                 the page (static/index.html)
 GET /dashboard/static/{file}   its CSS and JS
 GET /dashboard/events          Server-Sent Events stream of app.events.publish() payloads
-/api/...                       JSON API (app/dashboard/api.py)
+/api/...                       JSON API (app/dashboard/api.py, app/dashboard/forms_api.py)
 """
 
 import asyncio
@@ -14,12 +14,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app import events
-from app.dashboard import api
+from app.dashboard import api, forms_api
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 router = APIRouter()
 router.include_router(api.router)
+router.include_router(forms_api.router)
 
 
 @router.get("/dashboard", include_in_schema=False)
