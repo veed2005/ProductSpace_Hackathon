@@ -25,7 +25,7 @@ sh scripts/setup.sh                       # installs deps, enables git hooks, cr
 uv run uvicorn app.main:app --reload      # always run commands from the repo folder
 ```
 
-Then open Claude Code in this folder and say **"Start Phase A1"** (or B1, C1, D1 for your lane).
+Then open Claude Code in this folder and tell it what to work on (every phase in the lane plans is merged; see [Build status](#build-status)). Setting up on a new computer: [Moving to another computer](docs/CALL_THE_INTERNET.md#moving-to-another-computer) lists what git doesn't carry (`.env`, `data/`, ngrok's token, the extension).
 
 Chat with Formline in the terminal (no Twilio needed):
 
@@ -46,19 +46,20 @@ uv run python scripts/e2e_golden_path.py   # browser agent end to end: Chromium 
 
 ## Twilio + ngrok setup
 
-1. **Expose the local server.**
+1. **Expose the local server.** Run `ngrok config add-authtoken <token>` once per computer. With a reserved domain (the team has one; it's in `PUBLIC_BASE_URL`):
    ```bash
-   ngrok http 8000
+   ngrok http --url=https://your-name.ngrok-free.dev 8000
    ```
-   Copy the `https://….ngrok-free.app` URL into `PUBLIC_BASE_URL` in `.env` and restart the server.
+   Without one, run `ngrok http 8000`, copy its `https://…` URL into `PUBLIC_BASE_URL` in `.env`, and restart the server.
 2. **Get a Twilio number** with Voice, SMS, and MMS capability (Console → Phone Numbers → Buy a number). On a trial account you can only text and call verified numbers, so verify each demo phone under *Verified Caller IDs*.
 3. **Point the number at Formline** (Console → Phone Numbers → your number):
    - *Messaging* → "A message comes in" → Webhook, `POST`, `{PUBLIC_BASE_URL}/twilio/messaging`
    - *Voice* → "A call comes in" → Webhook, `POST`, `{PUBLIC_BASE_URL}/twilio/voice`
 4. **Credentials.** Put `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` in `.env`.
 5. **Signature validation** is on by default. Set `TWILIO_VALIDATE_SIGNATURES=false` only for local testing with hand-crafted requests.
+6. **Account settings.** Outgoing calls need US geo permissions, and outgoing texts need A2P 10DLC registration. Neither is in `.env`; see [Twilio account settings](docs/CALL_THE_INTERNET.md#twilio-account-settings).
 
-The ngrok URL changes every time you restart ngrok on a free plan, so update `PUBLIC_BASE_URL` and the Twilio webhooks when it does (or use a reserved ngrok domain).
+Without a reserved domain the ngrok URL changes every time ngrok restarts, so update `PUBLIC_BASE_URL` and rerun `uv run python -m app.channels.twilio_setup` (which sets the webhooks in step 3) when it does.
 
 ## Repo layout
 
@@ -69,32 +70,21 @@ app/
   engines/     form engine, document engine, status engine
   memory/      canonical profile facts with provenance and freshness
   pdf/         fill + verify
-  llm/         Anthropic client, tool definitions, prompts
+  llm/         Anthropic or OpenAI client, tool definitions, prompts
   channels/    Twilio messaging webhook, voice (ConversationRelay)
-  dashboard/   live partner dashboard
+  dashboard/   live partner dashboard (and the browser agent's Agent tab)
+  agent/       browser agent: call controller, decision loop, policy, prompts
+  browser/     extension pairing, websocket hub, page sanitizing, PDF reading
+extension/     Chrome extension (Manifest V3): page snapshot, constrained actions, pairing popup
+demo_sites/    fake sites the agent is tested on (Riverbend, library, Reelbox, privacy testbench)
 forms/<form_id>/   form.pdf, schema.json, meta.json
-scripts/       simulate.py, ingest_form.py, seed_demo.py, reset_demo.py
+scripts/       simulate.py, call_sim.py, e2e_golden_path.py, extension_smoke.py, seed_demo.py, reset_demo.py, ...
 tests/
-docs/          TRADEOFFS.md, PRIVACY.md, DEMO_SCRIPT.md
+docs/          CALL_THE_INTERNET.md, TRADEOFFS.md, PRIVACY.md, DEMO_SCRIPT.md
 ```
 
 ## Build status
 
-- [x] Phase 0: setup, models, FastAPI skeleton
-- [x] Team scaffolding: lane contracts and working stubs, sample form, simulator, CI
-- [x] D1: canonical profile keys, demo seed/reset
-- [x] D2: live dashboard v1 (people, transcript, fields by source, verification, PDF download)
-- [x] D3: full "forget me" deletion, Memory tab (facts with source and freshness)
-- [x] D4: Letter view (photo + explanation), form library with review and "Add a new form" upload
-- [x] D5: Metrics page (first vs. later form time), demo controls, local-only dashboard
-- [x] D6: [DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md), [PRIVACY.md](docs/PRIVACY.md), demo letter generator, pre-flight check (rehearsals pending other lanes)
-- [ ] Phase 1: brain + CLI simulator
-- [ ] Phase 2: SMS/MMS
-- [ ] Phase 3: document engine
-- [ ] Phase 4: PDF fill, verification, run-back
-- [ ] Phase 5: memory
-- [ ] Phase 6: form ingestion
-- [ ] Phase 7: voice
-- [ ] Phase 8: dashboard + metrics
-- [ ] Phase 9: reminders
-- [ ] Phase 10: demo hardening
+- All lane plans are merged: Lane A (#22, #23), B1–B6, C1–C6 and D1–D6.
+- The "call the internet" pivot (Chrome extension + browser agent) landed in #24.
+- Open: outgoing calls and texts wait on [Twilio account settings](docs/CALL_THE_INTERNET.md#twilio-account-settings), and the browser-agent code (`app/agent/`, `app/browser/`, `extension/`, `demo_sites/`) has no lane owner yet.

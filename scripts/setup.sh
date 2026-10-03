@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv is not installed. Install it, then re-run this script:"
-  echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+  echo "  Mac/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh"
+  echo "  Windows:   powershell -ExecutionPolicy ByPass -c \"irm https://astral.sh/uv/install.ps1 | iex\""
   exit 1
 fi
 
@@ -18,7 +19,7 @@ git config core.hooksPath .githooks
 
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "==> Created .env from .env.example. Fill in ANTHROPIC_API_KEY; get Twilio values from Lane B."
+  echo "==> Created .env from .env.example. Fill in OPENAI_API_KEY (or ANTHROPIC_API_KEY); get Twilio values from Lane B."
 fi
 
 echo "==> Running tests"

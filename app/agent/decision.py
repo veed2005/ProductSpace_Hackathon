@@ -23,6 +23,11 @@ class Step(BaseModel):
     value: Optional[str]  # words to search for, text to type, option to select, or scroll direction
 
 
+class Remember(BaseModel):
+    key: str  # canonical profile path, e.g. "date_of_birth", "address.city"
+    value: str  # as the caller said it; code converts and checks it (app/agent/memory.py)
+
+
 class Decision(BaseModel):
     # act: run `steps` (1-3, nothing consequential)        ask_user: ask the caller one question
     # confirm: `steps` holds the single consequential step  done: the page shows the goal is achieved
@@ -33,3 +38,6 @@ class Decision(BaseModel):
     say: str  # spoken to the caller: status, question, confirmation summary, or result
     reason: str  # one short sentence for the partner dashboard; no personal details
     evidence: Optional[str]  # done/answer: exact text on the current page or document that supports it
+    # Personal details the CALLER said that are worth reusing next time. Only a proposal: the caller is asked
+    # before anything is saved. Defaults to None so code and tests can omit it; strict schemas still require it.
+    remember: Optional[list[Remember]] = None
