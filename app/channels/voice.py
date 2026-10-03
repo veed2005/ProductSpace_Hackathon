@@ -44,11 +44,15 @@ LANG_TAGS = {"en": "en-US", "es": "es-US"}
 GREETING = {"en": "Hi, this is Formline.", "es": "Hola, habla Formline."}
 SORRY = {"en": "Sorry, something went wrong. Could you say that again?",
          "es": "Perdón, algo salió mal. ¿Puede repetirlo?"}
+FILLER = {"en": "One moment.", "es": "Un momento."}
+RECORDING_NOTICE = {"en": " This call is recorded.", "es": " Esta llamada se graba."}
 FALLBACK = ("Sorry, Formline can't take calls right now. Please text this number instead. "
             "Lo sentimos, por favor envíe un mensaje de texto a este número.")
 
 DTMF_PAUSE_S = 2.0  # keypad digits are sent to the brain after this pause, on '#', or at 4 digits
 TOKEN_TTL_S = 120
+FILLER_AFTER_S = 2.5  # say "One moment." if the brain is slower than this
+TURN_TIMEOUT_S = 25.0  # give up on a turn after this and apologize, rather than leave dead air
 
 
 # ---------------------------------------------------------------- one-time relay tokens
@@ -93,6 +97,23 @@ def speech_seconds(text: str) -> float:
     return min(15.0, 1.0 + len(text.split()) / 2.5)
 
 
+def greeting(lang: str) -> str:
+    return GREETING[lang] + (RECORDING_NOTICE[lang] if get_settings().record_calls else "")
+
+
+def start_recording(call_sid: str) -> None:
+    """Record the call (both sides, separate channels) for demo backup footage.
+    Recordings appear in the Twilio console under Monitor > Logs > Call recordings."""
+    s = get_settings()
+    if not (call_sid and s.twilio_account_sid and s.twilio_auth_token):
+        return
+    from twilio.rest import Client
+
+    Client(s.twilio_account_sid, s.twilio_auth_token).calls(call_sid).recordings.create(
+        recording_channels="dual")
+    log.info("recording call %s", call_sid)
+
+
 def _xml(resp: VoiceResponse) -> Response:
     return Response(content=str(resp), media_type="application/xml")
 
@@ -126,7 +147,7 @@ async def inbound_call(request: Request) -> Response:
         lang = await run_in_threadpool(caller_language, params.get("From", ""))
         resp = VoiceResponse()
         connect = resp.connect(action=get_settings().public_base_url.rstrip("/") + "/twilio/voice/status")
-        relay = connect.conversation_relay(url=relay_url(issue_token()), welcome_greeting=GREETING[lang],
+        relay = connect.conversation_relay(url=relay_url(issue_token()), welcome_greeting=greeting(lang),
                                            language=LANG_TAGS[lang], dtmf_detection=True,
                                            interruptible="any")
         for tag in LANG_TAGS.values():
@@ -185,6 +206,8 @@ class VoiceCall:
         if kind == "setup":
             self.phone = msg.get("from", "")
             self.lang = await run_in_threadpool(caller_language, self.phone)
+            if get_settings().record_calls:
+                self._in_background(run_in_threadpool(start_recording, msg.get("callSid", "")))
             await self.turn("", timed=False)  # let the brain greet (or say "welcome back")
         elif kind == "prompt":
             if msg.get("last", True) and msg.get("voicePrompt", "").strip():
@@ -223,12 +246,9 @@ class VoiceCall:
             if self.ended:
                 return
             started = time.perf_counter()
-            try:
-                result = await run_in_threadpool(
-                    handle_turn, TurnRequest(phone=self.phone, channel="voice", text=text))
-            except Exception:
-                log.exception("voice turn failed")
-                result = TurnResult(reply=SORRY.get(self.lang, SORRY["en"]), language=self.lang)
+            brain = asyncio.ensure_future(run_in_threadpool(
+                handle_turn, TurnRequest(phone=self.phone, channel="voice", text=text)))
+            result = await self._await_brain(brain)
             await self.speak(result)
             if timed:
                 log_event("voice_latency", phone=self.phone, channel="voice",
@@ -239,6 +259,25 @@ class VoiceCall:
                 await asyncio.sleep(speech_seconds(result.reply))  # "end" cuts speech off
                 await self.send({"type": "end"})
                 self.ended = True
+
+    async def _await_brain(self, brain: asyncio.Future) -> TurnResult:
+        """The brain's result. Says "One moment." if it's slow; apologizes if it fails or takes
+        longer than TURN_TIMEOUT_S, so the caller never sits in silence."""
+        sorry = TurnResult(reply=SORRY.get(self.lang, SORRY["en"]), language=self.lang)
+        try:
+            return await asyncio.wait_for(asyncio.shield(brain), FILLER_AFTER_S)
+        except asyncio.TimeoutError:
+            await self.send({"type": "text", "token": FILLER.get(self.lang, FILLER["en"]), "last": True})
+        except Exception:
+            log.exception("voice turn failed")
+            return sorry
+        try:
+            return await asyncio.wait_for(brain, max(0.0, TURN_TIMEOUT_S - FILLER_AFTER_S))
+        except asyncio.TimeoutError:
+            log.error("voice turn took over %ss; apologized instead", TURN_TIMEOUT_S)
+        except Exception:
+            log.exception("voice turn failed")
+        return sorry
 
     async def speak(self, result: TurnResult) -> None:
         if result.language in LANG_TAGS and result.language != self.lang:

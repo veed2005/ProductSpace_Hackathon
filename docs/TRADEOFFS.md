@@ -212,3 +212,21 @@ Format: decision, alternatives considered, why.
 
 **Switching the person on a shared phone (`select_profile`) drops the PIN verification and active task.**
 - Why: James's verified PIN must never unlock Denise's details, and James's half-filled form isn't Denise's. The conversation `state`/`pending` stay with the brain, which decides what to say next.
+**Reminders: an in-process APScheduler job checks every minute; sending first claims the row (`pending` → `sending`).**
+- Alternatives: a separate worker process; Twilio's own scheduled messages.
+- Why: one process is simplest for a demo laptop, and a minute's precision is plenty for deadline reminders. The atomic claim means the scheduler and the dashboard's "Send now" can never text the same reminder twice. The first check runs a minute after startup, which also keeps the job from firing inside short-lived test apps.
+
+**A reminder that fails to send is marked `failed`, not retried.**
+- Why: if Twilio rejects a number (opted out, unregistered sender), retrying every minute would hammer it. The failure is logged as activity so a partner sees it, and "Send now" can't resend it by accident.
+
+**Reminder texts are scrubbed of anything shaped like a full SSN, both when saved and when sent.**
+- Why: reminder wording can come from a letter the person photographed. Case numbers and dates stay, since the person needs them.
+
+**Voice: say "One moment." when the brain takes over 2.5 s, and apologize at 25 s instead of waiting.**
+- Why: on a call, silence feels like a dropped line and people hang up. The `voice_latency` metric still measures the time to the real answer, not to the filler, so it stays honest.
+
+**Call recording for the backup video is opt-in (`FORMLINE_RECORD_CALLS`), and the greeting announces it.**
+- Why: Illinois requires every party's consent to record a call, and recordings hold voices and personal details. Only team phones should be on a call while it's on.
+
+**When the laptop or ngrok is down, Twilio's fallback URL points at a Twilio-hosted TwiML Bin.**
+- Why: our own fallback (`/twilio/voice/status`) can't help if our server is unreachable. A TwiML Bin lives on Twilio, so callers still hear "Formline is offline, try again in a few minutes" instead of Twilio's generic error.
