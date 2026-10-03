@@ -25,12 +25,16 @@ from app.models import Activity, Document, Message, Profile, ProfileFact, Remind
 router = APIRouter(prefix="/api")
 
 
-# Short replies that are just 4 digits are almost always a PIN or SSN last-4: never project them.
+# A bare 4-digit reply right after Formline asked for a PIN / SSN digits is a secret: never project it.
+# (Without that context, "1450" is just as likely an income answer, so it stays visible.)
 _SECRET_REPLY = re.compile(r"^\D{0,3}(\d[\s.-]?){4}\D{0,3}$")
+_ASKED_SECRET = re.compile(r"\b(pin|ssn|social|seguro|digits?|d[ií]gitos|last (4|four)|[uú]ltimos)\b", re.I)
 
 
-def mask_message(direction: str, text: str) -> str:
-    return "•••• (hidden)" if direction == "in" and _SECRET_REPLY.match(text.strip()) else text
+def mask_message(direction: str, text: str, *, after_secret_question: bool) -> str:
+    if direction == "in" and after_secret_question and _SECRET_REPLY.match(text.strip()):
+        return "•••• (hidden)"
+    return text
 
 
 def mask_phone(phone: str) -> str:
@@ -109,8 +113,21 @@ def task_view(task: Task) -> dict:
     applicable = [f for f in fields if f["applies"]]
     duration = None
     if task.completed_at:
-        duration = (_latest(task.completed_at) - _latest(task.started_at)).total_seconds()
+        duration = round((_latest(task.completed_at) - _latest(task.started_at)).total_seconds())
+    comparison = None
+    if task.completed_at and duration is not None:
+        with session_scope() as s:
+            prior = s.exec(select(Task).where(Task.profile_id == task.profile_id, Task.id != task.id,
+                                              Task.status == "completed", Task.completed_at.is_not(None),
+                                              Task.completed_at < task.completed_at)
+                           .order_by(Task.completed_at)).first()
+        if prior:
+            first_s = round((_latest(prior.completed_at) - _latest(prior.started_at)).total_seconds())
+            if first_s > 0:
+                comparison = {"first_form_id": prior.form_id, "first_s": first_s, "this_s": duration,
+                              "faster_pct": round(100 * (1 - duration / first_s))}
     return {
+        "comparison": comparison,
         "id": task.id, "kind": task.kind, "status": task.status, "form_id": task.form_id,
         "form_name": schema.name if schema else task.form_id, "profile_id": task.profile_id,
         "current_field": task.current_field, "turn_count": task.turn_count,
@@ -330,6 +347,11 @@ def messages(phone: str, limit: int = 200) -> list[dict]:
     with session_scope() as s:
         rows = s.exec(select(Message).where(Message.phone == phone)
                       .order_by(Message.created_at.desc(), Message.id.desc()).limit(limit)).all()
-    return [{"id": m.id, "direction": m.direction, "channel": m.channel, "text": mask_message(m.direction, m.text),
-             "media": [Path(p).name for p in m.media], "task_id": m.task_id, "at": _iso(m.created_at)}
-            for m in reversed(rows)]
+    out, asked_secret = [], False
+    for m in reversed(rows):
+        out.append({"id": m.id, "direction": m.direction, "channel": m.channel,
+                    "text": mask_message(m.direction, m.text, after_secret_question=asked_secret),
+                    "media": [Path(p).name for p in m.media], "task_id": m.task_id, "at": _iso(m.created_at)})
+        if m.direction == "out":
+            asked_secret = bool(_ASKED_SECRET.search(m.text))
+    return out

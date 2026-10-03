@@ -18,12 +18,14 @@
     <nav class="nav" aria-label="Views">
       <button class="nav-btn active" data-page="live">Live</button>
       <button class="nav-btn" data-page="forms">Forms</button>
+      <button class="nav-btn" data-page="metrics">Metrics</button>
     </nav>
     <div class="topbar-right">
       <label class="follow" title="Jump to whoever is talking to Formline right now">
         <input type="checkbox" id="follow" checked>
         <span>Follow live</span>
       </label>
+      <button class="btn secondary demo-btn" id="demo-btn">Demo</button>
       <span class="conn" id="conn"><span class="dot"></span><span id="conn-text">Connecting…</span></span>
     </div>
   </header>
@@ -71,6 +73,20 @@
       <div id="form-detail"><p class="empty">Pick a form to see its questions.</p></div>
     </section>
   </main>
+
+  <main class="metrics-page" id="page-metrics" hidden>
+    <div id="metrics"></div>
+  </main>
+
+  <dialog id="demo-dialog" class="upload-dialog demo-dialog">
+    <div class="demo-body">
+      <div class="detail-head">
+        <h2>Demo controls</h2>
+        <button class="btn secondary" id="demo-close">Close</button>
+      </div>
+      <div id="demo-content"></div>
+    </div>
+  </dialog>
 
   <dialog id="upload-dialog" class="upload-dialog">
     <form id="upload-form" method="dialog">
