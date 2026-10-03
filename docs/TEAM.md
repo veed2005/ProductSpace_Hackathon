@@ -1,17 +1,26 @@
 # Team workflow: four people, no merge pain
 
+**Build order:** [docs/PLAN.md](PLAN.md) (stages, checkpoints, handoffs). **Your phases:** [Lane A](lanes/LANE_A.md) · [Lane B](lanes/LANE_B.md) · [Lane C](lanes/LANE_C.md) · [Lane D](lanes/LANE_D.md).
+
 The code is split into **four lanes**. Each lane owns its own files, and lanes talk only through the contracts in `app/contracts.py` and the small APIs listed below. Every cross-lane function already exists as a working stub, so nobody waits on anybody: build your lane against the stubs, and replace your own stubs as you go.
 
 ## Lanes
 
 | Lane | Owner | Owns (edit freely) | Phases |
 |---|---|---|---|
-| **A: Conversation brain** | _TBD_ | `app/core/turn.py`, `app/core/router.py`, `app/core/style.py`, `app/engines/form_engine.py` (new), `app/llm/prompts/conversation*`, `scripts/simulate.py`, `tests/test_brain_*.py` | 1, conversation side of 4 (read-back, receipt text) and 5 (prefill, batch confirm, stale re-ask, PIN prompts, "forget me" flow) |
-| **B: Channels + identity** | _TBD_ | `app/channels/*`, `app/core/identity.py`, `app/reminders.py` (new), Twilio console, ngrok, `tests/test_channels_*.py` | 2, 7, 9, storage side of 5 (PIN, shared phones) |
-| **C: Forms, PDFs, documents** | _TBD_ | `app/engines/form_library.py`, `app/engines/document_engine.py`, `app/pdf/*`, `forms/*`, `scripts/ingest_form.py`, `scripts/inspect_pdf.py`, `scripts/make_sample_form.py`, `app/llm/prompts/document*`, `app/llm/prompts/ingest*`, `tests/test_forms_*.py`, `tests/test_docs_*.py` | 3, fill + verify side of 4, 6 |
-| **D: Memory, dashboard, metrics, demo** | _TBD_ | `app/memory/*`, `app/engines/status_engine.py`, `app/dashboard/*`, `app/metrics.py` (new), `scripts/seed_demo.py`, `scripts/reset_demo.py`, `docs/PRIVACY.md`, `docs/DEMO_SCRIPT.md`, `tests/test_memory_*.py`, `tests/test_dashboard_*.py` | storage side of 5, 8, 10 |
+| **A: Conversation brain** | @aryavsaigal | `app/core/turn.py`, `app/core/router.py`, `app/core/style.py`, `app/core/referrals*` (new), `app/engines/form_engine.py` (new), `app/llm/prompts/conversation*`, `scripts/simulate.py`, `tests/test_brain_*.py` | 1, conversation side of 4 (read-back, receipt text) and 5 (prefill, batch confirm, stale re-ask, PIN prompts, "forget me" flow) |
+| **B: Channels + identity** | @Edoubek1024 | `app/channels/*`, `app/core/identity.py`, `app/reminders.py` (new), Twilio console, ngrok, `tests/test_channels_*.py` | 2, 7, 9, storage side of 5 (PIN, shared phones) |
+| **C: Forms, PDFs, documents** | @luisNava111 | `app/engines/form_library.py`, `app/engines/document_engine.py`, `app/engines/ingest.py`, `app/pdf/*`, `forms/*`, `scripts/ingest_form.py`, `scripts/inspect_pdf.py`, `scripts/make_sample_form.py`, `app/llm/prompts/document*`, `app/llm/prompts/ingest*`, `tests/test_forms_*.py`, `tests/test_docs_*.py` | 3, fill + verify side of 4, 6 |
+| **D: Memory, dashboard, metrics, demo** | @veed2005 | `app/memory/*`, `app/engines/status_engine.py`, `app/dashboard/*`, `app/metrics.py` (new), `scripts/seed_demo.py`, `scripts/reset_demo.py`, `docs/PRIVACY.md`, `docs/DEMO_SCRIPT.md`, `tests/test_memory_*.py`, `tests/test_dashboard_*.py` | storage side of 5, 8, 10 |
 
-GitHub: `veed2005`, `aryavsaigal`, `Edoubek1024`, `luisNava111`. Fill in the Owner column once you've picked lanes.
+The source of truth for file ownership is `scripts/lane.py` (CODEOWNERS mirrors it). Check any file with `python3 scripts/lane.py owner <path>`.
+
+### How lanes are enforced
+
+- **Claude Code knows your lane.** When anyone opens Claude Code in this repo, a session hook (`.claude/settings.json` → `scripts/lane.py session-start`) works out who you are from your GitHub login (`gh`) or git config, and tells Claude your lane, your plan file, and which files it may edit. If it can't tell, Claude asks you. Pin it yourself with `python3 scripts/lane.py set <A|B|C|D>`.
+- **Git hook.** `.githooks/pre-push` blocks direct pushes to `main` and warns when your branch edits another lane's files or shared files. The Claude session hook turns it on automatically. Without Claude, run once: `git config core.hooksPath .githooks`.
+- **CODEOWNERS.** A PR that touches another lane's files automatically requests that owner's review.
+- **Self-check any time:** `python3 scripts/lane.py check`.
 
 ## Shared files: announce before editing
 
@@ -30,7 +39,10 @@ The database is recreated from the models, not migrated. After someone changes `
 | Caller → Provider | Function | Status |
 |---|---|---|
 | B → A | `core.turn.handle_turn(TurnRequest) -> TurnResult` | placeholder brain |
-| A → B | `core.identity.get_session / save_session / profiles_for_phone / create_profile / update_profile / set_pin / check_pin / pin_verified` | working |
+| A → B | `core.identity.get_session / save_session / note_channel / profiles_for_phone / create_profile / update_profile / set_pin / check_pin / pin_verified` | working |
+| D → B | `core.identity.reset_pin`, `reminders.send_now / pending_reminders` | working |
+| A → B | `reminders.create_reminder(profile_id, due_at, message, ...)` | working (scheduler in B4) |
+| D → C | `engines.ingest.ingest_pdf(path, form_id=..., name=..., aliases=...)` | stub (C4) |
 | A, D → B | `channels.outbound.send_sms(to, body)` | working (logs only when Twilio isn't configured) |
 | A → C | `engines.form_library.list_forms / load_schema / load_meta / match_form / pdf_path` | working (alias match only) |
 | A → C | `pdf.fill.fill_pdf(template, {pdf_field: value}, out_path)` and `pdf.verify.verify_pdf(path, expected) -> VerificationResult` | working (no truncation check yet) |
@@ -88,16 +100,7 @@ git checkout --theirs uv.lock && uv lock && git add uv.lock
 
 ## Checkpoints
 
-Short sync every ~3 hours: what merged, what's blocked, and whether anything in the contracts needs to change.
-
-| Checkpoint | Goal | Lanes |
-|---|---|---|
-| **M1** | Fill the sample form end to end over **real SMS**, with a filled, verified PDF at the end | A (form engine), B (SMS + Twilio), C (fill/verify hardening), D (live transcript on dashboard) |
-| **M2** | Real demo forms, document photos explained, memory prefill, dashboard showing fields by source | all |
-| **M3** | Voice via ConversationRelay, reminders, metrics panel | B, D, A |
-| **Demo** | Reset/seed scripts, DEMO_SCRIPT.md, backup video, latency tuning | all |
-
-Must-haves if time runs short: Phases 1–5 and 8 (see the project brief).
+Short sync every ~3 hours: what merged, what's blocked, and whether anything in the contracts needs to change. The checkpoints (M1, M2, M3, Demo) and what each lane delivers for them are in [docs/PLAN.md](PLAN.md).
 
 ## Running things
 
@@ -105,5 +108,6 @@ Must-haves if time runs short: Phases 1–5 and 8 (see the project brief).
 uv sync                                   # install
 uv run uvicorn app.main:app --reload      # server on :8000
 uv run python scripts/simulate.py         # chat with the brain in the terminal
+python3 scripts/lane.py whoami            # which lane am I?
 uv run pytest                             # tests
 ```

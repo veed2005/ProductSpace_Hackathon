@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks direct pushes to main and warns about edits outside your lane. See scripts/lane.py.
+exec python3 "$(git rev-parse --show-toplevel)/scripts/lane.py" pre-push

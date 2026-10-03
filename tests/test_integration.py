@@ -64,3 +64,10 @@ def test_memory_and_pin():
     identity.set_pin(p.id, "1234")
     assert identity.check_pin(p.id, "1234")
     assert not identity.check_pin(p.id, "0000")
+
+
+def test_dev_turn_endpoint_is_off_by_default():
+    from app.main import app
+
+    with TestClient(app) as client:
+        assert client.post("/dev/turn", json={"phone": "+1555", "channel": "sms", "text": "hi"}).status_code == 404

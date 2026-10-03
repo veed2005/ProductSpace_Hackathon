@@ -92,3 +92,18 @@ def pin_verified(sess: Session) -> bool:
     if at.tzinfo is None:
         at = at.replace(tzinfo=timezone.utc)
     return datetime.now(timezone.utc) - at < PIN_VALID_FOR
+
+
+def reset_pin(profile_id: int) -> None:
+    """Partner-initiated reset from the dashboard. The person sets a new PIN on next contact."""
+    update_profile(profile_id, pin_hash=None)
+
+
+def note_channel(sess: Session, channel: str) -> bool:
+    """Record the channel for this turn. Returns True if the person switched channels.
+
+    TODO(Lane B): log_event("channel_switch", ...) when switched.
+    """
+    switched = sess.last_channel is not None and sess.last_channel != channel
+    sess.last_channel = channel
+    return switched

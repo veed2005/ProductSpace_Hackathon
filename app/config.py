@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     data_dir: Path = ROOT_DIR / "data"
     forms_dir: Path = ROOT_DIR / "forms"
     log_level: str = "INFO"
+    # Enables POST /dev/turn so scripts/simulate.py --server can drive the running app.
+    # Never enable on a publicly reachable server: it skips Twilio auth entirely.
+    dev_endpoints: bool = Field(False, alias="FORMLINE_DEV_ENDPOINTS")
 
 
 @lru_cache

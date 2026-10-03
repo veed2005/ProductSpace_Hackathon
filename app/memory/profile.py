@@ -13,7 +13,10 @@ from app.db import session_scope
 from app.events import log_activity, publish
 from app.models import Profile, ProfileFact, Session
 
-# Days until a value should be re-confirmed. None = never stale.
+# Canonical profile keys (form schemas map fields to these via profile_key; nested paths like
+# "employment.employer" or "household_members[0].name" are allowed) and the days until each
+# should be re-confirmed. None = never stale. Lane C maps schemas to these keys: add new keys
+# here first.
 FRESHNESS_POLICY: dict[str, Optional[int]] = {
     "full_name": None,
     "date_of_birth": None,
@@ -21,6 +24,7 @@ FRESHNESS_POLICY: dict[str, Optional[int]] = {
     "phone": 180,
     "preferred_language": None,
     "household_members": 90,
+    "household_size": 90,
     "employment": 30,
     "monthly_income": 30,
     "housing_cost": 90,

@@ -18,7 +18,7 @@ MENU = "I can help you fill out a form, or explain a letter or document you got.
 
 def handle_turn(req: TurnRequest) -> TurnResult:
     sess = identity.get_session(req.phone)
-    sess.last_channel = req.channel
+    identity.note_channel(sess, req.channel)
     identity.save_session(sess)
     log_message(req.phone, "in", req.channel, req.text, profile_id=sess.profile_id,
                 task_id=sess.active_task_id, media=req.media_paths)
