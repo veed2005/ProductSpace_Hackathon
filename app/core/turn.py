@@ -19,6 +19,7 @@ from app.engines import document_engine, form_library
 from app.engines.status_engine import recent_activity
 from app.engines.form_engine import (
     answer_field,
+    reply_key,
     memory_confirmation_text,
     process_memory_confirmation,
     process_readback,
@@ -76,6 +77,8 @@ def handle_turn(req: TurnRequest) -> TurnResult:
 
 
 def _sensitive_log_text(sess, text: str) -> str:
+    if sess.state == "awaiting_pin_setup":  # never store a PIN in the transcript
+        return "[PIN]"
     if not sess.active_task_id:
         return text
     with session_scope() as s:
@@ -108,7 +111,7 @@ def _brain_turn(req: TurnRequest, sess) -> TurnResult:
     if sess.state == "awaiting_consent":
         return _consent_flow(req, sess)
     if sess.state == "form_memory_confirm" and sess.active_task_id:
-        answer = (req.text or "").strip().casefold()
+        answer = reply_key(req.text)
         if answer in {"yes", "y", "sí", "si", "use them", "use it"}:
             accepted = True
         elif answer in {"no", "n", "nope", "don't use them", "do not use them"}:
@@ -324,7 +327,7 @@ def _completion_result(task: Task, language: str, phone: str) -> TurnResult:
 
 
 def _new_phone_flow(req: TurnRequest, sess) -> TurnResult:
-    text = (req.text or "").strip().casefold()
+    text = reply_key(req.text)
     if _language_choice(text) == "en":
         sess.pending = {"language": "en"}
         sess.state = "awaiting_consent"
@@ -343,7 +346,7 @@ def _new_phone_flow(req: TurnRequest, sess) -> TurnResult:
 
 
 def _language_flow(req: TurnRequest, sess) -> TurnResult:
-    text = (req.text or "").strip().casefold()
+    text = reply_key(req.text)
     lang = _language_choice(text)
     if lang is None:
         reply = LANGUAGE_PROMPT_ES if sess.pending.get("language") == "es" else LANGUAGE_PROMPT
@@ -357,15 +360,17 @@ def _language_flow(req: TurnRequest, sess) -> TurnResult:
 
 
 def _language_choice(text: str) -> str | None:
-    if re.search(r"\b(?:english|en)\b", text):
-        return "en"
-    if re.search(r"\b(?:español|espanol|spanish|es)\b", text):
+    """'en español por favor' is Spanish: check the language names before the bare codes,
+    and accept a bare 'en'/'es' only as the whole reply."""
+    if re.search(r"\b(?:español|espanol|spanish|castellano)\b", text):
         return "es"
-    return None
+    if re.search(r"\b(?:english|inglés|ingles)\b", text):
+        return "en"
+    return {"en": "en", "es": "es"}.get(text.strip())
 
 
 def _consent_flow(req: TurnRequest, sess) -> TurnResult:
-    text = (req.text or "").strip().lower()
+    text = reply_key(req.text)
     lang = sess.pending.get("language", "en")
     if text in {"yes", "sí", "si", "y", "ok", "okay", "accept", "acepto"}:
         profile = identity.create_profile(req.phone, language=lang)
@@ -385,7 +390,7 @@ def _consent_flow(req: TurnRequest, sess) -> TurnResult:
 
 def _pin_setup_flow(req: TurnRequest, sess) -> TurnResult:
     lang = sess.pending.get("language", "en")
-    pin = (req.text or "").strip()
+    pin = re.sub(r"[\s.,-]", "", reply_key(req.text))  # "1 2 3 4." from speech -> "1234"
     if len(pin) != 4 or not pin.isdigit():
         prompt = "Please enter exactly 4 digits for your PIN." if lang == "en" else "Ingrese exactamente 4 dígitos para su PIN."
         return TurnResult(reply=prompt, language=lang)
@@ -398,7 +403,7 @@ def _pin_setup_flow(req: TurnRequest, sess) -> TurnResult:
 
 
 def _profile_selection_flow(req: TurnRequest, sess, profiles) -> TurnResult:
-    text = (req.text or "").strip().casefold()
+    text = reply_key(req.text)
     selected = None
     if text.isdigit() and 1 <= int(text) <= len(profiles):
         selected = profiles[int(text) - 1]
@@ -416,7 +421,7 @@ def _profile_selection_flow(req: TurnRequest, sess, profiles) -> TurnResult:
 
 
 def _forget_confirmation_flow(req: TurnRequest, sess) -> TurnResult:
-    text = (req.text or "").strip().casefold()
+    text = reply_key(req.text)
     profile_id = sess.pending.get("profile_id")
     profile = identity.get_profile(profile_id) if profile_id else None
     language = profile.preferred_language if profile else "en"
@@ -518,7 +523,7 @@ def _explain_document(req: TurnRequest, sess, profile) -> TurnResult:
 
 
 def _document_followup_flow(req: TurnRequest, sess) -> TurnResult:
-    text = (req.text or "").strip().casefold()
+    text = reply_key(req.text)
     yes = text in {"yes", "y", "sí", "si", "sure", "okay", "ok"}
     no = text in {"no", "n", "nope", "not now"}
     profile = identity.get_profile(sess.profile_id) if sess.profile_id else None
