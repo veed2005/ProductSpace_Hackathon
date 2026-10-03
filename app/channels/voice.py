@@ -35,6 +35,7 @@ from app.contracts import TurnRequest, TurnResult
 from app.core import identity
 from app.core.turn import handle_turn
 from app.events import log_event
+from app.formcall.language import CALL_TAGS
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ router = APIRouter(prefix="/twilio")
 
 # Brain language code -> BCP-47 tag for Twilio speech. Add a tag here and a <Language> is declared.
 LANG_TAGS = {"en": "en-US", "es": "es-US"}
+# Every language a call can switch its voice to mid-call (browser calls follow whatever the caller speaks).
+SPEECH_TAGS = {**CALL_TAGS, **LANG_TAGS}
 GREETING = {"en": "Hi, this is Formline.", "es": "Hola, habla Formline."}
 SORRY = {"en": "Sorry, something went wrong. Could you say that again?",
          "es": "Perdón, algo salió mal. ¿Puede repetirlo?"}
@@ -150,7 +153,7 @@ async def inbound_call(request: Request) -> Response:
         connect = resp.connect(action=get_settings().public_base_url.rstrip("/") + "/twilio/voice/status")
         extra = {}
         if get_settings().voice_autodetect:
-            # Recognize English or Spanish whatever the profile says; each prompt reports which it heard.
+            # Recognize whatever language is spoken, whatever the profile says; each prompt reports which.
             extra = {"transcription_language": "multi", "speech_model": "nova-3-general"}
         relay = connect.conversation_relay(url=relay_url(issue_token()), welcome_greeting=greeting(lang),
                                            language=LANG_TAGS[lang], dtmf_detection=True,
@@ -228,6 +231,7 @@ class VoiceCall:
                 await self.turn("", timed=False)  # let the brain greet (or say "welcome back")
         elif kind == "prompt":
             if msg.get("last", True) and msg.get("voicePrompt", "").strip():
+                log.info("caller speech tagged %s by the recognizer", msg.get("lang"))
                 if self.controller:
                     self._prompt_at = time.perf_counter()
                     # returns at once; work continues
@@ -319,9 +323,9 @@ class VoiceCall:
 
     async def switch_language(self, lang: str) -> None:
         """Speak (and, without autodetect, listen) in `lang` from the next line on."""
-        if lang not in LANG_TAGS or lang == self.lang:
+        if lang not in SPEECH_TAGS or lang == self.lang:
             return
-        tag = LANG_TAGS[lang]
+        tag = SPEECH_TAGS[lang]
         switch = {"type": "language", "ttsLanguage": tag}
         if not get_settings().voice_autodetect:  # with "multi" recognition, keep listening for both
             switch["transcriptionLanguage"] = tag

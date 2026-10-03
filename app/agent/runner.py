@@ -36,6 +36,7 @@ from app.browser.protocol import ActionResult, PageState, TabInfo
 from app.browser.sanitize import mask
 from app.config import get_settings
 from app.events import log_event
+from app.formcall import language as lang_mod
 from app.llm import client as llm
 
 log = logging.getLogger(__name__)
@@ -254,15 +255,17 @@ def _norm(text: str) -> str:
 class BrowserAgent:
     def __init__(self, *, browser: BrowserPort, say: Callable[[str], Awaitable[None]], profile_id: int,
                  installation_id: str, phone: str, channel: str = "voice", language: str = "en",
-                 decide: Optional[Decider] = None):
+                 decide: Optional[Decider] = None,
+                 on_language: Optional[Callable[[str, str], Awaitable[None]]] = None):
         self.browser = browser
         self._say_cb = say
         self.profile_id = profile_id
         self.installation_id = installation_id
         self.phone = phone
         self.channel = channel
-        self.language = language if language in SAY else "en"
+        self.language = language if language in lang_mod.CALL_LANGUAGES else "en"
         self.decide = decide or llm_decide
+        self.on_language = on_language  # (language code, the caller's words): the call decides whether to switch
 
         self.task_id: Optional[int] = None
         self.goal: Optional[str] = None
@@ -346,7 +349,7 @@ class BrowserAgent:
             store.add_action(self.task_id, "stopped", reason="Caller said stop")
         await self.browser.overlay(None)
         if spoken:
-            await self._say(self._t("stopped"))
+            await self._say(await self._t("stopped"))
 
     async def close(self) -> None:
         """The call ended. Nothing more runs; an unfinished task is marked interrupted."""
@@ -362,8 +365,12 @@ class BrowserAgent:
 
     # ------------------------------------------------------------ helpers
 
-    def _t(self, key: str, **kw) -> str:
-        return SAY[self.language][key].format(**kw)
+    async def _t(self, key: str, **kw) -> str:
+        """One of Formline's own lines in the call's language (translated once and cached beyond English/Spanish)."""
+        if self.language in SAY:
+            return SAY[self.language][key].format(**kw)
+        template = await run_in_threadpool(lang_mod.phrase, self.language, f"agent.{key}", SAY["en"][key])
+        return template.format(**kw)
 
     async def _say(self, text: str) -> None:
         text = (text or "").strip()
@@ -390,22 +397,22 @@ class BrowserAgent:
             raise
         except BrowserGone:
             self._persist(status="waiting_input")
-            await self._say(self._t("gone"))
+            await self._say(await self._t("gone"))
         except PageUnavailable as e:
             log.info("page unavailable: %s", e)
             self._persist(status="waiting_input")
-            await self._say(self._t("no_page"))
+            await self._say(await self._t("no_page"))
         except Exception:
             log.exception("browser agent failed")
             self._persist(status="waiting_input")
-            await self._say(self._t("error"))
+            await self._say(await self._t("error"))
         finally:
             filler.cancel()
 
     async def _filler(self, started: float) -> None:
         await asyncio.sleep(FILLER_AFTER_S)
         if self.last_spoke < started:
-            await self._say(self._t("filler"))
+            await self._say(await self._t("filler"))
 
     async def _new_task(self, goal: str) -> None:
         page = None
@@ -553,7 +560,7 @@ class BrowserAgent:
                 errors = 0
                 if step.action == "switch_tab":
                     # The agent changed what the person sees, so it says where it is now.
-                    await self._say(self._t("tab", name=site_name(await self._page())))
+                    await self._say(await self._t("tab", name=site_name(await self._page())))
                     break
                 if result.page_changed and step.action in ("click", "press_enter", "go_back", "navigate", "search"):
                     break  # look at the new page before doing more
@@ -562,11 +569,11 @@ class BrowserAgent:
         else:
             self.last_outcome = "long"
             self._persist(status="waiting_input")
-            await self._say(self._t("long"))
+            await self._say(await self._t("long"))
             return
         self.last_outcome = "trouble"
         self._persist(status="waiting_input")
-        await self._say(self._t("trouble"))
+        await self._say(await self._t("trouble"))
 
     async def _page(self, *, fresh: bool = False) -> PageState:
         """The current page, after any loading indicator goes away (up to about 6 seconds)."""
@@ -642,6 +649,7 @@ class BrowserAgent:
             decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": content}])
         ms = round((time.perf_counter() - started) * 1000)
         decision = self._tidy(decision, page)
+        await self._follow_language(decision)
         await self._collect_memory(decision)
         _trace(user, decision, ms)
         self.model_calls += 1
@@ -650,6 +658,14 @@ class BrowserAgent:
         log.info("agent %s in %sms: %s | %s", decision.kind, ms,
                  [(s.action, s.element_id, s.value) for s in decision.steps], decision.reason)
         return decision
+
+    async def _follow_language(self, decision: Decision) -> None:
+        """Tell the call which language the model heard, before anything from this decision is spoken."""
+        code = (decision.language or "").split("-")[0].strip().lower()
+        if not self.on_language or code not in lang_mod.CALL_LANGUAGES or code == self.language:
+            return
+        latest = next((text for who, text in reversed(self.transcript) if who == "caller"), "")
+        await self.on_language(code, latest)
 
     async def _tabs(self) -> list[TabInfo]:
         """The window's tabs, if this browser can list them. Never fails a decision."""
@@ -687,14 +703,17 @@ class BrowserAgent:
         if self.task_id:
             store.add_action(self.task_id, "remember_offer", element_label=", ".join(p.path for p in offers),
                              reason="Caller shared details worth reusing")
-        await self._say(agent_memory.offer_text(offers, self.language))
+        offer = agent_memory.offer_text(offers, self.language)
+        if self.language not in SAY:
+            offer = await run_in_threadpool(lang_mod.translate, offer, self.language)
+        await self._say(offer)
 
     async def _resolve_memory_offer(self, text: str) -> bool:
         """The caller's reply to "Would you like me to remember...?". False if they moved on to something else:
         nothing is saved and their words are handled as a new request."""
         offers = (self.pending or {}).get("proposals", [])
         self.pending = None
-        verdict = classify_reply(text)
+        verdict = classify_reply(text, self.language)
         if verdict == "other":
             return False
         saved = 0
@@ -704,7 +723,7 @@ class BrowserAgent:
             store.add_action(self.task_id, "remembered" if saved else "not_remembered",
                              element_label=", ".join(p.path for p in offers),
                              reason="Caller said yes" if verdict == "yes" else "Caller said no")
-        await self._say(self._t("remembered" if saved else "not_remembered"))
+        await self._say(await self._t("remembered" if saved else "not_remembered"))
         return True
 
     async def _screen(self, page: PageState) -> Optional[str]:
@@ -817,14 +836,14 @@ class BrowserAgent:
                 and retry.steps[0].action == step.action):
             await self._request_confirmation(retry.steps[0], page, retry.say, retry.reason)
         else:
-            await self._request_confirmation(step, page, self._t("press", label=el.label if el else "that"),
+            await self._request_confirmation(step, page, await self._t("press", label=el.label if el else "that"),
                                              decision.reason)
 
     async def _request_confirmation(self, step: Step, page: PageState, say: str, reason: str) -> None:
         el = page.control(step.element_id)
-        say = (say or "").strip() or self._t("press", label=el.label if el else "that")
+        say = (say or "").strip() or await self._t("press", label=el.label if el else "that")
         if not say.endswith("?"):
-            say = f"{say} {self._t('confirm_q')}"
+            say = f"{say} {await self._t('confirm_q')}"
         self.pending = {"type": "confirm", "step": step.model_dump(), "label": el.label if el else None,
                         "role": el.role if el else None, "doc_id": page.doc_id, "url": page.url,
                         "fingerprint": page_fingerprint(page, step.element_id), "say": say,
@@ -838,7 +857,7 @@ class BrowserAgent:
 
     async def _resolve_confirmation(self, text: str) -> None:
         pending = self.pending or {}
-        verdict = classify_reply(text)
+        verdict = classify_reply(text, self.language)
         if time.time() - pending.get("created_at", 0) > CONFIRM_TTL_S and verdict == "yes":
             verdict = "no"  # too old to trust; ask again
         if verdict == "yes":
@@ -851,7 +870,7 @@ class BrowserAgent:
         await self.browser.overlay("Formline is helping on the phone. Say “stop” to pause.")
         if verdict == "no":
             self._persist(status="waiting_input", pending={})
-            await self._say(self._t("declined"))
+            await self._say(await self._t("declined"))
             return
         self.notes.append("You asked the caller to confirm, but they said something else instead (see the "
                           "conversation). Nothing was submitted. Do what they asked now.")
@@ -870,7 +889,7 @@ class BrowserAgent:
                               "Look again; confirm again before any final step.")
             self.required_confirmation = False
             self._persist(status="active", pending={})
-            await self._say(self._t("stale"))
+            await self._say(await self._t("stale"))
             await self._loop()
             return
         store.add_action(self.task_id, "confirmed", element_label=pending.get("label"), reason="Caller said yes")

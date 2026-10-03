@@ -188,3 +188,29 @@ def test_source_files_have_no_stray_control_characters():
             if p.suffix in (".py", ".js") and p.is_file():
                 text = p.read_text(encoding="utf-8")
                 assert not any(ord(c) < 32 and c not in "\n\r\t" for c in text), p
+
+
+@pytest.mark.parametrize("text,verdict", [
+    ("Oui.", "yes"), ("Ja, bitte.", "yes"), ("Sim", "yes"), ("हाँ", "yes"), ("जी हाँ", "yes"), ("Да.", "yes"),
+    ("はい", "yes"), ("はい、お願いします", "yes"), ("haan", "yes"),
+    ("Non.", "no"), ("Nein, danke", "no"), ("Não", "no"), ("नहीं", "no"), ("Нет", "no"), ("いいえ", "no"), ("Nee", "no"),
+    ("Oui mais mardi", "other"), ("Ja, aber am Dienstag bitte", "other"), ("हाँ लेकिन मंगलवार को", "other"),
+    ("Oui je voudrais aussi changer la raison de la visite", "other"),  # long: a new instruction, not consent
+    ("Mardi", "other"), ("मंगलवार", "other"),
+])
+def test_yes_and_no_in_the_other_call_languages(text, verdict):
+    assert classify_reply(text, "hi") == verdict  # any call language beyond English and Spanish
+
+
+def test_foreign_yes_words_dont_count_on_an_english_or_spanish_call():
+    assert classify_reply("Sim card, please") == "other"
+    assert classify_reply("Sim", "es") == "other"
+    assert classify_reply("Yes.", "hi") == "yes"  # English and Spanish answers still work on any call
+
+
+@pytest.mark.parametrize("text,stop", [
+    ("रुको", True), ("Stopp!", True), ("Arrête", True), ("Стоп", True), ("ストップ", True), ("Basta.", True),
+    ("Halt", True), ("रविवार", False), ("Bonjour", False),
+])
+def test_stop_in_the_other_call_languages(text, stop):
+    assert is_stop(text) is stop

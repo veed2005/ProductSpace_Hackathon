@@ -168,6 +168,7 @@ Latest live results (2026-10-03, `gpt-5.4-mini`, simulated caller): golden demo 
 ## Known limits and next steps
 
 - Formline starts on the active tab of the most recently used browser and can move between the tabs of that window; with several paired browsers it picks the most recently active one rather than asking. Tabs in other windows can't be reached.
+- Calls follow the caller's language among English, Spanish, French, German, Hindi, Russian, Portuguese, Japanese, Italian and Dutch. Yes, no and stop are recognized from short word lists in each; a longer or hedged reply is treated as a new instruction, never as consent. Phone forms stay English and Spanish.
 - Custom widgets with no accessible name and no visible text can't be targeted yet; the screenshot fallback helps the model understand them but there is no click-by-coordinates action (deliberately).
 - Iframes (including cross-origin) aren't read.
 - PDFs over 10 MB, or past about 250,000 characters of text, are cut off; the agent says so.

@@ -43,3 +43,6 @@ class Decision(BaseModel):
     # Personal details the CALLER said that are worth reusing next time. Only a proposal: the caller is asked
     # before anything is saved. Defaults to None so code and tests can omit it; strict schemas still require it.
     remember: Optional[list[Remember]] = None
+    # The language of the caller's latest message as a two-letter code ("fr"), when it's clear. Only a proposal:
+    # code checks it against the supported call languages before the call switches (app/agent/call.py).
+    language: Optional[str] = None
