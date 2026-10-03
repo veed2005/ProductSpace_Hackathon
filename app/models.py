@@ -123,6 +123,17 @@ class Document(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class PinGuard(SQLModel, table=True):
+    """Wrong-PIN attempts per profile (Lane B). A separate table, so existing databases pick it up
+    without a reset. No foreign key on purpose: it holds only counts, and profile deletion
+    (forget me, demo reset) never has to know about it."""
+
+    profile_id: int = Field(primary_key=True)
+    failed_attempts: int = 0
+    locked_at: Optional[datetime] = None
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class Reminder(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     profile_id: int = Field(foreign_key="profile.id", index=True)
