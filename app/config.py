@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Enables POST /dev/turn so scripts/simulate.py --server can drive the running app.
     # Never enable on a publicly reachable server: it skips Twilio auth entirely.
     dev_endpoints: bool = Field(False, alias="FORMLINE_DEV_ENDPOINTS")
+    # The dashboard and its API answer only requests made on this machine (not via ngrok).
+    # Set true only on a trusted network: it exposes personal data and the demo reset button.
+    dashboard_remote: bool = Field(False, alias="FORMLINE_DASHBOARD_REMOTE")
 
 
 @lru_cache

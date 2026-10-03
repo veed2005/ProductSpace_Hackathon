@@ -75,3 +75,13 @@ Format: decision, alternatives considered, why.
 
 **The form library flags problems instead of blocking: PDF fields that don't exist, unknown memory keys, broken conditions, SSN fields not marked sensitive.**
 - Why: generated schemas are drafts. The reviewer sees exactly what to fix before pressing "Mark reviewed".
+
+**The dashboard and its API only answer requests made on the machine running Formline.**
+- Alternatives: a password; leave it open.
+- Why: during the demo ngrok exposes the whole server so Twilio can reach the webhooks, which would also put personal data and the "Reset everything" button on a public URL. ngrok forwards from localhost but adds `X-Forwarded-For`, so the check rejects any request that's non-local or carries proxy headers. `/twilio/*` is unaffected. `FORMLINE_DASHBOARD_REMOTE=true` turns it off for a trusted network. A password would be the production answer.
+
+**Metrics come from the `events` table; the per-form "x% faster" banner comes from task timestamps.**
+- Why: metrics follow the brief's event contract and keep working after "forget me" strips identity. The live banner only needs this person's previous task, which the tasks table answers directly. Both use the same definition: time from form start to completion.
+
+**Transcript hides a 4-digit reply only when Formline's previous message asked for a PIN or SSN digits.**
+- Why: the first version hid every bare 4-digit reply, which also hid income answers like "1450" during testing.

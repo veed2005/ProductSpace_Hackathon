@@ -28,7 +28,7 @@ uv run python scripts/simulate.py --phone +15550001111 --channel sms
 ```
 
 - Health check: http://localhost:8000/health
-- Dashboard: http://localhost:8000/dashboard
+- Dashboard: http://localhost:8000/dashboard (only from the computer running the server, never through ngrok)
 
 Run tests:
 
@@ -79,6 +79,7 @@ docs/          TRADEOFFS.md, PRIVACY.md, DEMO_SCRIPT.md
 - [x] D2: live dashboard v1 (people, transcript, fields by source, verification, PDF download)
 - [x] D3: full "forget me" deletion, Memory tab (facts with source and freshness)
 - [x] D4: Letter view (photo + explanation), form library with review and "Add a new form" upload
+- [x] D5: Metrics page (first vs. later form time), demo controls, local-only dashboard
 - [ ] Phase 1: brain + CLI simulator
 - [ ] Phase 2: SMS/MMS
 - [ ] Phase 3: document engine

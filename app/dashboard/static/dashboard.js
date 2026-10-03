@@ -231,6 +231,11 @@ function renderTask(changed) {
       ${["memory", "document", "asked", "corrected", "unknown", "skipped"].map((k) =>
         c[k] ? `<span class="${k}" style="width:${pct(c[k])}%"></span>` : "").join("")}
     </div>
+    ${t.comparison ? `
+    <div class="faster">
+      <strong>${t.comparison.faster_pct > 0 ? `${t.comparison.faster_pct}% faster` : "Done"}</strong>
+      <span>${fmtDuration(t.comparison.this_s)} this time vs. ${fmtDuration(t.comparison.first_s)} for their first form</span>
+    </div>` : ""}
     ${verify}
     ${groups.map((g) => `
       <div class="group-title">${esc(g.name)}</div>
@@ -496,9 +501,11 @@ function setPage(page) {
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
   $("page-live").hidden = page !== "live";
   $("page-forms").hidden = page !== "forms";
+  $("page-metrics").hidden = page !== "metrics";
   document.querySelector(".legend").hidden = page !== "live";
   document.querySelector(".follow").hidden = page !== "live";
   if (page === "forms") loadForms();
+  if (page === "metrics") loadMetrics();
 }
 
 document.querySelector(".nav").addEventListener("click", (e) => {
@@ -629,6 +636,139 @@ $("upload-form").addEventListener("submit", async (e) => {
   }
 });
 
+// ---------------------------------------------------------------- metrics
+
+const dash = "—";
+const ms = (v) => (v == null ? dash : v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${Math.round(v)}ms`);
+const pctOr = (v) => (v == null ? dash : `${Math.round(v)}%`);
+
+async function loadMetrics() {
+  const m = await getJSON("/api/metrics");
+  if (state.page === "metrics") renderMetrics(m);
+}
+
+function tile(label, value, sub = "") {
+  const muted = value === dash;
+  return `<div class="tile"><div class="tile-label">${esc(label)}</div>
+    <div class="tile-value ${muted ? "muted" : ""}">${muted ? "Not yet" : esc(value)}</div>
+    ${sub ? `<div class="tile-sub">${sub}</div>` : ""}</div>`;
+}
+
+function renderMetrics(m) {
+  const f = m.forms, pair = f.latest_pair;
+  const hero = f.avg_first_s != null && f.avg_later_s != null;
+  const max = Math.max(f.avg_first_s || 0, f.avg_later_s || 0, 1);
+  const bar = (cls, name, secs) => `
+    <div class="compare-row">
+      <span class="compare-name">${esc(name)}</span>
+      <div class="compare-track"><div class="compare-bar ${cls}" style="width:${Math.max(8, (100 * secs) / max)}%">
+        <span>${fmtDuration(secs)}</span></div></div>
+    </div>`;
+  const ch = m.channels, chTotal = ch.sms + ch.voice;
+  $("metrics").innerHTML = `
+    <div class="metrics-grid">
+      <section class="tile hero" aria-label="Memory makes forms faster">
+        <div>
+          <div class="tile-label">With memory, later forms take</div>
+          <div class="hero-figure">${hero && f.faster_pct != null ? `${f.faster_pct}% less time` : "Not yet"}</div>
+          <div class="hero-label">${hero ? `than a person's first form (average of ${f.later_count} later form${f.later_count === 1 ? "" : "s"})`
+            : "Shows once someone completes a second form."}</div>
+          ${pair ? `<div class="hero-note">Latest: ${esc(pair.name)}, ${fmtDuration(pair.first_s)} → ${fmtDuration(pair.later_s)}${pair.later_fields
+            ? ` · ${pair.later_from_memory ?? 0} of ${pair.later_fields} answers from memory` : ""}</div>` : ""}
+        </div>
+        <div class="compare" aria-label="Average time to complete a form">
+          ${f.avg_first_s != null ? bar("first", "First form", f.avg_first_s) : ""}
+          ${f.avg_later_s != null ? bar("later", "Later forms", f.avg_later_s) : ""}
+          ${f.avg_first_s == null ? `<p class="empty">No completed forms yet.</p>` : ""}
+        </div>
+      </section>
+      ${tile("Answers filled from memory", pctOr(f.from_memory_pct), "across completed forms")}
+      ${tile("Forms completed", String(f.completed), `${f.started} started · ${f.abandoned} stopped partway`)}
+      ${tile("Turns per form", f.avg_turns == null ? dash : String(f.avg_turns), "messages or spoken turns, on average")}
+      ${tile("Corrected at read-back", pctOr(f.correction_rate_pct), `${f.corrections} correction${f.corrections === 1 ? "" : "s"}`)}
+      ${tile("Verification pass rate", pctOr(m.verification.pass_rate_pct), `${m.verification.passed} of ${m.verification.checked} filled PDFs re-read correctly`)}
+      ${tile("Letters explained", String(m.documents.explained), m.documents.explained ? `${m.documents.led_to_form} led to a form (${pctOr(m.documents.led_to_form_pct)})` : "")}
+      ${tile("Voice response time", ms(m.voice.avg_ms), m.voice.turns_measured ? `p90 ${ms(m.voice.p90_ms)} · ${m.voice.turns_measured} turns` : "")}
+      <div class="tile"><div class="tile-label">Channels people used</div>
+        ${chTotal ? `<div class="tile-value">${ch.sms} <small style="font-size:18px;font-weight:600;color:var(--ink-3)">SMS</small> · ${ch.voice} <small style="font-size:18px;font-weight:600;color:var(--ink-3)">voice</small></div>
+        <div class="split">${ch.sms ? `<span class="sms" style="width:${(100 * ch.sms) / chTotal}%"></span>` : ""}${ch.voice ? `<span class="voice" style="width:${(100 * ch.voice) / chTotal}%"></span>` : ""}</div>
+        <div class="key"><span><i style="background:#1d4ed8"></i>SMS</span><span><i style="background:#d18b00"></i>Voice</span></div>
+        <div class="tile-sub">${ch.switches} channel switch${ch.switches === 1 ? "" : "es"}</div>`
+        : `<div class="tile-value muted">Not yet</div>`}
+      </div>
+      <div class="tile"><div class="tile-label">Where unfinished forms stopped</div>
+        ${f.dropoff.length ? `<ul>${f.dropoff.map((d) => `<li>${esc(d.where)} (${d.count})</li>`).join("")}</ul>`
+          : `<div class="tile-value muted">None</div>`}
+      </div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------- demo controls
+
+const demoDialog = $("demo-dialog");
+$("demo-btn").addEventListener("click", () => { demoDialog.showModal(); loadDemo(); });
+$("demo-close").addEventListener("click", () => demoDialog.close());
+
+function savedPhone() {
+  try { return localStorage.getItem("formline.returningPhone") || ""; } catch { return ""; }
+}
+
+async function loadDemo(message = "", error = false) {
+  const d = await getJSON("/api/demo/state");
+  $("demo-content").innerHTML = `
+    <div class="demo-msg ${error ? "error" : ""}" id="demo-msg">${esc(message)}</div>
+    <div class="demo-section">
+      <h3>Demo data</h3>
+      <div class="demo-inline">
+        <input id="demo-phone" placeholder="Maria's phone, e.g. +12175550123" value="${esc(savedPhone())}" aria-label="Phone number for Maria (optional)">
+        <button class="btn small" data-act="seed">Seed personas</button>
+        <button class="btn small danger" data-act="reset">Reset everything</button>
+      </div>
+      <div class="sub">Maria's phone defaults to a fake 555 number. Put a team phone here to text as Maria on stage.
+        PINs: Maria ${esc(d.pins.maria)}, James ${esc(d.pins.james)}, Denise ${esc(d.pins.denise)}.</div>
+    </div>
+    <div class="demo-section">
+      <h3>Reminders waiting to send</h3>
+      ${d.reminders.length ? d.reminders.map((r) => `
+        <div class="demo-row"><div>${esc(r.message)}<div class="sub">${esc(r.name)} · due ${fmtDate(r.due_at)}</div></div>
+          <button class="btn small" data-act="send" data-id="${r.id}">Send now</button></div>`).join("")
+        : `<p class="empty" style="margin:4px">No pending reminders.</p>`}
+    </div>
+    <div class="demo-section">
+      <h3>Reset a PIN</h3>
+      ${d.profiles.map((p) => `
+        <div class="demo-row"><div>${esc(p.name)} <span class="sub">${esc(p.phone_masked)} · ${p.pin_set ? "PIN set" : "no PIN"}</span></div>
+          <button class="btn small secondary" data-act="pin" data-id="${p.id}" ${p.pin_set ? "" : "disabled"}>Reset PIN</button></div>`).join("")
+        || `<p class="empty" style="margin:4px">No profiles.</p>`}
+    </div>`;
+}
+
+$("demo-content").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const phone = $("demo-phone")?.value.trim() || "";
+  try { localStorage.setItem("formline.returningPhone", phone); } catch {}
+  if (act === "reset" && !confirm("Delete ALL data (people, forms, letters, transcripts) and reseed the demo?")) return;
+  btn.disabled = true;
+  const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined });
+  const call = {
+    seed: () => post("/api/demo/seed", phone ? { returning_phone: phone } : null),
+    reset: () => post("/api/demo/reset", phone ? { returning_phone: phone } : null),
+    send: () => post(`/api/demo/reminders/${btn.dataset.id}/send`),
+    pin: () => post(`/api/profiles/${btn.dataset.id}/reset-pin`),
+  }[act];
+  const r = await call();
+  const body = await r.json().catch(() => ({}));
+  const done = { seed: "Personas seeded.", reset: "Everything reset and reseeded.", send: "Reminder sent.", pin: "PIN reset." }[act];
+  await loadDemo(r.ok ? done : body.detail || `Failed (${r.status})`, !r.ok);
+  if (r.ok && (act === "seed" || act === "reset")) {
+    state.phone = null;
+    refresh({ people: true });
+  }
+});
+
 // ---------------------------------------------------------------- live updates
 
 let pending = { people: false, messages: false, task: false, profile: false, docs: false };
@@ -689,6 +829,7 @@ function connect() {
 
 setInterval(() => {
   if (state.page === "live") refresh({ people: true, messages: true, task: true, profile: true, docs: true });
+  if (state.page === "metrics") loadMetrics().catch(console.warn);
 }, POLL_MS);
 setInterval(renderPeople, 30000);  // keep "x min ago" current
 connect();
