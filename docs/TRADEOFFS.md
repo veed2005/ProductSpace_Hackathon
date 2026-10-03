@@ -68,3 +68,9 @@ Format: decision, alternatives considered, why.
 **"Forget me" hard-deletes the person's data but keeps anonymized metrics events.**
 - Alternatives: soft delete (a `deleted_at` flag); delete metrics events too.
 - Why: a deletion the person asked for should be real, including their filled PDFs and letter photos. Metrics events keep only numbers (durations, counts) once identity is stripped, so the aggregate metrics stay honest. On a shared phone, transcript lines that were never tied to anyone are kept while another profile remains, because they may belong to that person.
+
+## Lane B
+
+**Twilio webhooks are set by a script (`python -m app.channels.twilio_setup`), not by hand in the console.**
+- Alternatives: click through the console every time; a reserved ngrok domain only.
+- Why: a free ngrok URL changes on every restart, and a stale webhook silently breaks the demo. The script can read the live URL from the local ngrok agent, repoints both webhooks in one step, and reports missing capabilities and (on trial accounts) unverified phones.
