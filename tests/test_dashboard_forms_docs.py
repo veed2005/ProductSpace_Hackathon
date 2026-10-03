@@ -74,11 +74,33 @@ def test_mark_reviewed_round_trip(client, forms_dir):
     assert client.post("/api/forms/sample_benefits/review", json={"reviewed": True}).json()["reviewed"] is True
 
 
-def test_upload_reports_ingestion_not_built(client, forms_dir):
+def test_upload_runs_real_ingestion_with_a_mocked_model(client, forms_dir, monkeypatch):
+    from app.engines.ingest import Draft, DraftField
+    from app.llm import client as llm
+
+    draft = Draft(fields=[
+        DraftField(id="applicant", label="Name", type="text", question_hint="What is your name?",
+                   pdf_field="applicant", profile_key="full_name", required=True),
+        DraftField(id="heats_with_gas", label="Heats with gas", type="yes_no", question_hint="Do you heat with gas?"),
+        DraftField(id="behind_on_bills", label="Behind on bills", type="yes_no", question_hint="Are you behind?"),
+    ])
+    monkeypatch.setattr(llm, "structured", lambda output, **kw: draft)
     r = client.post("/api/forms/upload", data={"name": "LIHEAP Energy Help"},
                     files={"file": ("liheap.pdf", _pdf_bytes(), "application/pdf")})
-    assert r.status_code == 501 and "isn't available yet" in r.json()["detail"]
-    assert not (forms_dir / "liheap_energy_help").exists()
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["form_id"] == "liheap_energy_help" and body["reviewed"] is False and body["problems"] == []
+    assert (forms_dir / "liheap_energy_help" / "form.pdf").exists()
+
+
+def test_upload_of_a_flat_pdf_is_rejected(client, forms_dir):
+    import pymupdf
+    doc = pymupdf.open()
+    doc.new_page().insert_text((50, 50), "Scanned form")
+    r = client.post("/api/forms/upload", data={"name": "Flat Form"},
+                    files={"file": ("flat.pdf", doc.tobytes(), "application/pdf")})
+    assert r.status_code == 422 and "no fillable fields" in r.json()["detail"]
+    assert not (forms_dir / "flat_form").exists()
 
 
 def test_upload_validation(client):

@@ -6,6 +6,7 @@ from pathlib import Path
 import pymupdf as fitz
 
 from app.pdf.fields import OFF, PdfField, button_state, choice_value, has_xfa, list_fields_in
+from app.pdf.verify import shrink_to_fit
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,11 @@ def _set(doc: fitz.Document, widget: fitz.Widget, f: PdfField, value: str) -> No
         widget.field_value = choice_value(f, value)
     elif f.type == "text":
         widget.field_value = str(value)
+        if not f.comb:
+            info = next((w for w in f.widgets if w.xref == widget.xref), None)
+            size = shrink_to_fit(str(value), info, f.multiline) if info else None
+            if size:
+                widget.text_fontsize = size  # tight box (e.g. a date): smaller text, nothing cut off
     else:
         return  # push buttons, signatures: nothing to fill
     _update(widget)

@@ -170,7 +170,10 @@ def _truncated(form_pdf, tmp_path, values, required=None):
 
 
 def test_text_wider_than_box_is_truncated(form_pdf, tmp_path):
-    assert _truncated(form_pdf, tmp_path, {"name": "Maria Guadalupe Hernandez-Rodriguez de la Cruz"}) == ["name"]
+    # A long name shrinks to fit (down to 6pt); one that's too long even then is reported.
+    assert _truncated(form_pdf, tmp_path, {"name": "Maria Guadalupe Hernandez-Rodriguez de la Cruz"}) == []
+    too_long = "Maria Guadalupe Hernandez-Rodriguez de la Cruz y Villanueva de los Santos"
+    assert _truncated(form_pdf, tmp_path, {"name": too_long}) == ["name"]
 
 
 def test_text_longer_than_pdf_max_length_is_truncated(form_pdf, tmp_path):
@@ -191,6 +194,23 @@ def test_multiline_overflow_is_truncated(form_pdf, tmp_path):
 def test_auto_size_only_truncates_when_unreadable(form_pdf, tmp_path):
     assert _truncated(form_pdf, tmp_path, {"auto": "A fairly long line of text that shrinks"}) == []
     assert _truncated(form_pdf, tmp_path, {"auto": "x" * 200}) == ["auto"]
+
+
+def test_fill_shrinks_text_to_fit_a_tight_box(tmp_path):
+    doc = fitz.open()
+    page = doc.new_page()
+    _add(page, "dob", fitz.PDF_WIDGET_TYPE_TEXT, (50, 50, 97, 68), text_fontsize=10)  # 47pt, like Medicaid's
+    _add(page, "dob_ml", fitz.PDF_WIDGET_TYPE_TEXT, (50, 80, 97, 103), text_fontsize=10, field_flags=1 << 12)
+    _add(page, "tiny", fitz.PDF_WIDGET_TYPE_TEXT, (50, 120, 70, 138), text_fontsize=10)
+    src = tmp_path / "tight.pdf"
+    doc.save(src)
+    doc.close()
+    values = {"dob": "03/14/1988", "dob_ml": "03/14/1988", "tiny": "Hernandez-Rodriguez"}
+    out = fill_pdf(src, values, tmp_path / "out.pdf")
+    sizes = {f.name: f.widgets[0].font_size for f in list_fields(out)}
+    assert 6 <= sizes["dob"] < 10 and 6 <= sizes["dob_ml"] < 10
+    assert sizes["tiny"] == 10  # can't fit even at 6pt: left alone and reported
+    assert verify_pdf(out, values).truncated == ["tiny"]
 
 
 def test_text_that_fits_is_not_truncated(form_pdf, tmp_path):
