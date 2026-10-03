@@ -12,25 +12,32 @@ import json
 import logging
 import re
 import shutil
+import time
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
 
 import pymupdf as fitz
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
 from app.contracts import FieldCondition, FormField, FormMeta, FormSchema
 from app.engines import form_library
 from app.llm import client as llm
 from app.llm.prompts import ingest as prompts
 from app.memory import profile as memory
-from app.pdf.fields import OFF, PdfField, WidgetInfo, button_state, decode_name, list_fields_in
+from app.pdf.fields import OFF, PdfField, WidgetInfo, button_state, decode_name, has_xfa, list_fields_in
 
 log = logging.getLogger(__name__)
 
 FILLABLE = {"text", "checkbox", "radio", "combobox", "listbox"}
 MIN_FIELDS, MAX_FIELDS = 3, 60
-PAGE_TEXT_CHARS = 600  # start of each page: headings and instructions, enough for context
-MAX_PAGE_TEXT = 8000
+PAGE_TEXT_CHARS = 400  # start of each page: headings and instructions, enough for context
+MAX_PAGE_TEXT = 6000
+LABEL_CHARS = 100
+ROWS_SHOWN = 2  # of a repeating table (household members, jobs), the model sees the first two rows
+RETRY_IF_KEEPING_UNDER = 0.75  # ask the model again only if repair would keep less than this share
 _FORM_ID = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 # Tooltips that are just the authoring tool's default name carry no meaning.
 _GENERIC = re.compile(r"^(text|textfield|check ?box|check_box|radio ?button(list)?|combo ?box|list ?box|"
@@ -61,52 +68,59 @@ class Draft(BaseModel):
     fields: list[DraftField]
 
 
+@dataclass
+class Prepared:
+    """What we learned from the PDF before calling the model."""
+    fields: list[PdfField]  # every fillable field (the schema may use any of them)
+    field_lines: list[str]  # what the model sees: repeated table rows left out
+    rows_left_out: int
+    page_text: str
+    button_labels: dict[int, str]
+    seconds: float
+    handles: dict[str, str] = field(default_factory=dict)  # "F12" -> real PDF field name
+
+    @property
+    def chars(self) -> int:
+        return sum(len(line) + 1 for line in self.field_lines) + len(self.page_text)
+
+
 def ingest_pdf(pdf_path: Path, *, form_id: str, name: str, aliases: list[str] | None = None,
                model: str | None = None) -> FormSchema:
     """Copy the PDF into forms/<form_id>/, generate schema.json (reviewed=false) and meta.json.
 
-    Raises ValueError for a bad form_id, an unreadable PDF, or a PDF without fillable fields
-    (the dashboard shows the message). Raises anthropic.APIError if the model call fails.
+    Raises ValueError for a bad form_id, an unreadable or password-protected PDF, or a PDF
+    without fillable fields (the dashboard shows the message). Raises anthropic.APIError if the
+    model call fails.
     """
     if not _FORM_ID.match(form_id):
         raise ValueError("Form id must be 2-40 lowercase letters, digits or underscores, starting with a letter")
-    try:
-        doc = fitz.open(pdf_path)
-    except Exception as e:
-        raise ValueError(f"This file isn't a readable PDF ({e})") from e
-    try:
-        fields = [f for f in list_fields_in(doc) if f.type in FILLABLE and not f.flags & 1]
-        if not fields:
-            raise ValueError("This PDF has no fillable fields. It may be a scanned or flat form.")
-        button_labels = _button_labels(doc)
-        field_lines = [_describe(f, _field_label(doc, f), button_labels) for f in fields]
-        page_text = _page_text(doc)
-    finally:
-        doc.close()
+    start = time.monotonic()
+    prep = prepare(pdf_path)
+    by_name = {f.name: f for f in prep.fields}
+    model = model or get_settings().ingest_model or llm.strong_model()
 
-    by_name = {f.name: f for f in fields}
-    problems: list[str] | None = None
-    schema = None
-    for attempt in range(2):
-        draft = llm.structured(
-            Draft,
-            system=prompts.SYSTEM,
-            messages=[{"role": "user", "content": prompts.user_text(
-                name=name, field_lines=field_lines, page_text=page_text,
-                profile_keys=memory.describe_keys(), problems=problems)}],
-            model=model or llm.strong_model(),
-            max_tokens=16000,
-        )
-        schema = _to_schema(draft, form_id, name, by_name, button_labels)
-        problems = schema_problems(schema, by_name)
-        if not problems:
-            break
-        log.info("ingest %s: draft %d has %d problem(s)", form_id, attempt + 1, len(problems))
+    schema = _draft(prep, name, form_id, model, by_name)
+    attempts = 1
+    problems = schema_problems(schema, by_name)
     if problems:
-        log.warning("ingest %s: repairing %d remaining problem(s): %s", form_id, len(problems), problems)
-        schema = repair(schema, by_name)
+        repaired = _try_repair(schema, by_name)
+        # A second model call costs as long as the first. Repair is instant, so ask again only
+        # when repairing would throw away a real share of the questions.
+        if repaired is None or len(repaired.fields) < RETRY_IF_KEEPING_UNDER * len(schema.fields):
+            log.info("ingest %s: draft has %d problem(s), asking for a fix", form_id, len(problems))
+            schema = _draft(prep, name, form_id, model, by_name, problems=problems)
+            attempts = 2
+            problems = schema_problems(schema, by_name)
+            repaired = _try_repair(schema, by_name) if problems else schema
+        if problems:
+            log.warning("ingest %s: repaired %d problem(s): %s", form_id, len(problems), problems)
+            if repaired is None:
+                repair(schema, by_name)  # raises the ValueError explaining why nothing is usable
+            schema = repaired
 
     _write(pdf_path, schema, draft_meta(form_id, name, aliases))
+    log.info("ingest %s: %d questions in %.0fs (prep %.1fs, %d chars, %d model call(s), %s)", form_id,
+             len(schema.fields), time.monotonic() - start, prep.seconds, prep.chars, attempts, model)
     return schema
 
 
@@ -114,42 +128,120 @@ def draft_meta(form_id: str, name: str, aliases: list[str] | None = None) -> For
     return FormMeta(form_id=form_id, name=name, aliases=aliases or [])
 
 
+def _draft(prep: Prepared, name: str, form_id: str, model: str, by_name: dict[str, PdfField],
+           problems: list[str] | None = None) -> FormSchema:
+    if problems:  # speak the model's language: handles, not the PDF's long field names
+        to_handle = {real: h for h, real in prep.handles.items()}
+        problems = [re.sub(r"'([^']+)'", lambda m: f"'{to_handle.get(m.group(1), m.group(1))}'", p) for p in problems]
+    draft = llm.structured(
+        Draft,
+        system=prompts.SYSTEM,
+        messages=[{"role": "user", "content": prompts.user_text(
+            name=name, field_lines=prep.field_lines, page_text=prep.page_text,
+            profile_keys=memory.describe_keys(), problems=problems)}],
+        model=model,
+        max_tokens=16000,
+    )
+    return _to_schema(draft, form_id, name, by_name, prep.button_labels, prep.handles)
+
+
+def _try_repair(schema: FormSchema, by_name: dict[str, PdfField]) -> FormSchema | None:
+    try:
+        return repair(schema, by_name)
+    except ValueError:
+        return None
+
+
 # ---------------------------------------------------------------- describing the PDF
 
-def _button_labels(doc: fitz.Document) -> dict[int, str]:
-    """Widget xref -> the words printed just right of a checkbox/radio button ("Yes", "No")."""
-    labels = {}
+def prepare(pdf_path: Path) -> Prepared:
+    """Read the PDF once: fillable fields, their labels, Yes/No labels, and page text."""
+    start = time.monotonic()
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        raise ValueError(f"This file isn't a readable PDF ({e})") from e
+    try:
+        if doc.needs_pass:
+            raise ValueError("This PDF is password-protected. Upload an unlocked copy.")
+        fields = [f for f in list_fields_in(doc) if f.type in FILLABLE and not f.flags & 1]
+        if not fields:
+            if has_xfa(doc):
+                raise ValueError("This PDF is an XFA-only form, which we can't fill. Open it in Adobe Acrobat "
+                                 "and save it as a standard fillable PDF, then upload that.")
+            raise ValueError("This PDF has no fillable fields. It may be a scanned or flat form.")
+        words, tips, button_labels = _read_pages(doc)
+        page_text = _page_text(doc)
+    finally:
+        doc.close()
+
+    # The model refers to fields by a short handle ("F12"): XFA names like
+    # "form1[0].#subform[6].TextField4[0]" are long, cost tokens, and are easy to mistype.
+    handles = {f"F{i + 1}": f.name for i, f in enumerate(fields)}
+    lines, seen, left_out = [], Counter(), 0
+    for handle, f in zip(handles, fields):
+        label = _field_label(f, words[f.widgets[0].page], tips.get(f.name, ""))
+        key = _row_key(f, label)
+        seen[key] += 1
+        if seen[key] > ROWS_SHOWN:
+            left_out += 1
+            continue
+        lines.append(_describe(handle, f, label, button_labels))
+    if left_out:
+        lines.append(f"({left_out} more fields repeat the rows above for further people or items; left out)")
+    return Prepared(fields=fields, field_lines=lines, rows_left_out=left_out, page_text=page_text,
+                    button_labels=button_labels, seconds=time.monotonic() - start, handles=handles)
+
+
+def _read_pages(doc: fitz.Document) -> tuple[dict[int, list], dict[str, str], dict[int, str]]:
+    """One pass over the pages: words per page, tooltip per field name, and for each checkbox or
+    radio button the words printed just right of it ("Yes", "No")."""
+    words: dict[int, list] = {}
+    tips: dict[str, str] = {}
+    button_labels: dict[int, str] = {}
     for page in doc:
-        words = page.get_text("words")
+        words[page.number] = page_words = page.get_text("words")
         for w in page.widgets():
+            if w.field_label and w.field_name not in tips:
+                tips[w.field_name] = w.field_label
             if w.field_type not in (fitz.PDF_WIDGET_TYPE_CHECKBOX, fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
                 continue
             r, mid = w.rect, (w.rect.y0 + w.rect.y1) / 2
-            right = sorted((x for x in words if abs((x[1] + x[3]) / 2 - mid) < 5 and r.x1 - 2 <= x[0] < r.x1 + 45),
+            right = sorted((x for x in page_words if abs((x[1] + x[3]) / 2 - mid) < 5 and r.x1 - 2 <= x[0] < r.x1 + 45),
                            key=lambda x: x[0])
             if right:
-                labels[w.xref] = " ".join(x[4] for x in right[:3])
-    return labels
+                button_labels[w.xref] = " ".join(x[4] for x in right[:3])
+    return words, tips, button_labels
 
 
-def _field_label(doc: fitz.Document, f: PdfField) -> str:
+def _field_label(f: PdfField, words: list, tip: str) -> str:
     """The field's tooltip, or the printed words to its left (or above it) when the tooltip is generic."""
-    w0 = f.widgets[0]
-    page = doc[w0.page]
-    tip = next((w.field_label for w in page.widgets() if w.field_name == f.name), "") or ""
     if tip.strip() and not _GENERIC.match(tip.strip()):
-        return " ".join(tip.split())[:120]
-    r = fitz.Rect(w0.rect)
-    words = page.get_text("words")
+        return " ".join(tip.split())[:LABEL_CHARS]
+    r = fitz.Rect(f.widgets[0].rect)
     mid = (r.y0 + r.y1) / 2
     on_line = [x for x in words if abs((x[1] + x[3]) / 2 - mid) < 6 and x[2] <= r.x0 + 2]
     left = [x for x in on_line if x[2] > r.x0 - 220] or on_line  # nearest words, else the whole question
     if not left:
         left = [x for x in words if 0 <= r.y0 - x[3] < 14 and x[0] < r.x1 and x[2] > r.x0]
-    return " ".join(x[4] for x in sorted(left, key=lambda x: (round(x[1]), x[0])))[-120:] or "(no label)"
+    return " ".join(x[4] for x in sorted(left, key=lambda x: (round(x[1]), x[0])))[-LABEL_CHARS:] or "(no label)"
 
 
-def _describe(f: PdfField, label: str, button_labels: dict[int, str]) -> str:
+_ORDINALS = re.compile(r"\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|"
+                       r"\d+(st|nd|rd|th))\b|#\s*\d+|\b(row|line|person|child|applicant|member|job|item)[\s_#]*\d+|\d+",
+                       re.IGNORECASE)
+
+
+def _row_key(f: PdfField, label: str) -> str:
+    """Fields that differ only by a row number or ordinal ("income of person #3") share a key.
+    A label without one ("Address:") is its own key, so distinct fields are never hidden."""
+    generic, n = _ORDINALS.subn("#", label.lower())
+    if not n:
+        return f.name
+    return f"{f.type}|{generic}|{','.join(f.options[:5])}"
+
+
+def _describe(handle: str, f: PdfField, label: str, button_labels: dict[int, str]) -> str:
     page = f.widgets[0].page + 1
     extra = ""
     if f.type == "radio":
@@ -164,7 +256,7 @@ def _describe(f: PdfField, label: str, button_labels: dict[int, str]) -> str:
         extra = "options: " + ", ".join(f.options[:15])
     elif f.max_length:
         extra = f"max {f.max_length} chars"
-    return f"{f.name} | {f.type} | p{page} | {label} | {extra}".rstrip(" |")
+    return f"{handle} | {f.type} | p{page} | {label} | {extra}".rstrip(" |")
 
 
 def _label_for(w: WidgetInfo, button_labels: dict[int, str]) -> str:
@@ -185,9 +277,11 @@ def _page_text(doc: fitz.Document) -> str:
 # ---------------------------------------------------------------- draft -> schema
 
 def _to_schema(draft: Draft, form_id: str, name: str, by_name: dict[str, PdfField],
-               button_labels: dict[int, str]) -> FormSchema:
+               button_labels: dict[int, str], handles: dict[str, str] | None = None) -> FormSchema:
     out = []
     for d in draft.fields:
+        if d.pdf_field and handles and d.pdf_field.strip() in handles:  # "F12" -> the real field name
+            d = d.model_copy(update={"pdf_field": handles[d.pdf_field.strip()]})
         pf = by_name.get(d.pdf_field) if d.pdf_field else None
         ftype, sensitive, validation = d.type, d.sensitive, None
         if _SSN.search(f"{d.id} {d.label} {d.pdf_field or ''}") or ftype == "ssn_last4":

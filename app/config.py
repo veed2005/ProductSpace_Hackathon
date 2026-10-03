@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     fast_model: str = Field("claude-haiku-4-5", alias="FORMLINE_FAST_MODEL")
     strong_model: str = Field("claude-opus-5-5", alias="FORMLINE_STRONG_MODEL")
+    # Model for drafting form schemas on upload; empty means strong_model. Set it to a faster
+    # model if "Add a new form" is too slow for the stage demo.
+    ingest_model: str = Field("", alias="FORMLINE_INGEST_MODEL")
 
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

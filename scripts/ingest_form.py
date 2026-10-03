@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from app.engines.ingest import ingest_pdf  # noqa: E402
+from app.engines.ingest import ingest_pdf, prepare  # noqa: E402
 
 
 def main() -> None:
@@ -21,8 +21,21 @@ def main() -> None:
     parser.add_argument("--id", required=True, dest="form_id", help="e.g. il_medicaid")
     parser.add_argument("--name", required=True, help='e.g. "Illinois Medicaid Application"')
     parser.add_argument("--alias", action="append", default=[], help="what people call it (repeatable)")
-    parser.add_argument("--model", help="override the model (default: FORMLINE_STRONG_MODEL)")
+    parser.add_argument("--model", help="override the model (default: FORMLINE_INGEST_MODEL, else STRONG)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="only read the PDF and show what the model would get (no API call, nothing written)")
     args = parser.parse_args()
+
+    if args.dry_run:
+        try:
+            prep = prepare(args.pdf)
+        except ValueError as e:
+            sys.exit(f"error: {e}")
+        print(f"{args.pdf}: {len(prep.fields)} fillable fields, {len(prep.field_lines)} lines shown to the model "
+              f"({prep.rows_left_out} repeated rows left out), {prep.chars} chars (~{prep.chars // 4} tokens), "
+              f"read in {prep.seconds:.2f}s")
+        print("\n".join(prep.field_lines))
+        return
 
     start = time.monotonic()
     try:
