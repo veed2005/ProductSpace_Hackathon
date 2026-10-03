@@ -9,6 +9,8 @@
   python3 scripts/lane.py pre-push        # git pre-push hook (used by .githooks/pre-push)
 """
 
+from __future__ import annotations  # runs on macOS system Python 3.9
+
 import fnmatch
 import os
 import subprocess
@@ -65,9 +67,11 @@ SHARED = [
     "app/contracts.py", "app/models.py", "app/events.py", "app/llm/client.py", "app/config.py",
     "app/main.py", "app/db.py", "pyproject.toml", "uv.lock", ".env.example", "tests/conftest.py",
     "tests/test_integration.py", "CLAUDE.md", "docs/TEAM.md", "docs/PLAN.md", "scripts/lane.py",
+    "scripts/setup.sh", ".githooks/*", ".claude/settings.json", ".github/*",
 ]
 
 LANE_FILE = ROOT / ".git" / "formline-lane"
+BLOCKED = 3  # pre-push exit code meaning "refuse this push" (anything else non-zero is a script failure)
 
 
 def _run(*cmd: str) -> str:
@@ -87,6 +91,16 @@ def owner_of(path: str) -> str:
     return "unowned"
 
 
+def _norm(s: str) -> str:
+    return "".join(c for c in s.lower() if c.isalnum())
+
+
+def _same_person(value: str, login: str) -> bool:
+    """'Aryav Saigal' matches 'aryavsaigal'; 'Luis Nava' matches 'luisNava111'."""
+    v, l = _norm(value), _norm(login)
+    return bool(v) and (v == l or (len(v) >= 6 and l.startswith(v)))
+
+
 def whoami() -> tuple[str | None, str]:
     """(lane, how we know). Order: env var, pinned file, GitHub login, git config."""
     env = os.environ.get("FORMLINE_LANE", "").strip().upper()
@@ -96,15 +110,16 @@ def whoami() -> tuple[str | None, str]:
         pinned = LANE_FILE.read_text().strip().upper()
         if pinned in LANES:
             return pinned, "pinned with scripts/lane.py set"
+    email_user = _run("git", "config", "user.email").split("@")[0].split("+")[-1]  # 123+login@users.noreply...
     candidates = [
         (_run("gh", "api", "user", "--jq", ".login"), "GitHub login"),
         (_run("git", "config", "github.user"), "git config github.user"),
         (_run("git", "config", "user.name"), "git config user.name"),
-        (_run("git", "config", "user.email").split("@")[0], "git config user.email"),
+        (email_user, "git config user.email"),
     ]
     for value, how in candidates:
         for lane, info in LANES.items():
-            if value and value.lower() == info["owner"].lower():
+            if _same_person(value, info["owner"]):
                 return lane, f"{how} = {value}"
     return None, "could not match your GitHub login or git config to a lane owner"
 
@@ -158,7 +173,7 @@ def cmd_pre_push(stdin: str) -> int:
         if len(parts) == 4 and parts[2] == "refs/heads/main" and not os.environ.get("ALLOW_MAIN_PUSH"):
             print("\n✋ Don't push straight to main. Push your branch and open a PR:\n"
                   "   git push -u origin HEAD && gh pr create --fill\n", file=sys.stderr)
-            return 1
+            return BLOCKED
     lane, _ = whoami()
     if lane:
         other, shared = outside_lane(lane, changed_files())
