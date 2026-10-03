@@ -145,8 +145,41 @@ _STOP = re.compile(r"^(stop|stop it|stop that|stop now|please stop|cancel|cancel
                    r"hold on|wait|pause|para|pare|alto|detente|espera|cancela)\b")
 
 
-def classify_reply(text: str) -> str:
-    """'yes', 'no', or 'other' (a new instruction, e.g. 'yes but make it Tuesday')."""
+# Yes, no and stop in the other call languages (French, German, Hindi, Russian, Portuguese, Japanese, Italian,
+# Dutch). Matched on the first word of the raw reply, because _norm drops the vowel signs of Devanagari.
+_YES_WORDS = {"oui", "ouais", "ja", "jawohl", "sim", "sì", "da", "да", "हाँ", "हां", "जी", "haan", "han", "haanji"}
+_NO_WORDS = {"non", "nein", "nee", "não", "nao", "нет", "nyet", "नहीं", "नही", "nahi", "nahin"}
+_STOP_WORDS = {"stopp", "halt", "arrête", "arrete", "arrêtez", "arretez", "ferma", "fermati", "basta", "стоп",
+               "хватит", "रुको", "रुकिए", "ruko", "rukiye"}
+_YES_JA, _NO_JA, _STOP_JA = ("はい", "ええ", "お願いします"), ("いいえ", "いや", "やめ"), ("ストップ", "止め", "やめ")
+_HEDGE_WORDS = {"mais", "aber", "maar", "ma", "но", "lekin", "लेकिन", "par", "पर", "でも"}
+_TRIM = " \t.,!?¡¿;:।、。！？"
+
+
+def _first_words(text: str) -> list[str]:
+    return [w.strip(_TRIM) for w in (text or "").casefold().replace(",", " ").split() if w.strip(_TRIM)]
+
+
+def _other_language_reply(text: str) -> str:
+    raw = (text or "").strip(_TRIM)
+    if raw.startswith(_NO_JA):
+        return "no"
+    if raw.startswith(_YES_JA):
+        return "yes" if len(raw) <= 12 else "other"
+    ws = _first_words(text)
+    if not ws:
+        return "other"
+    if ws[0] in _NO_WORDS:
+        return "no"
+    # A foreign "yes" is consent only when that's all it is: short, and no "but".
+    if ws[0] in _YES_WORDS and len(ws) <= 4 and not any(w in _HEDGE_WORDS for w in ws):
+        return "yes"
+    return "other"
+
+
+def classify_reply(text: str, language: str = "en") -> str:
+    """'yes', 'no', or 'other' (a new instruction, e.g. 'yes but make it Tuesday'). `language` is the call's:
+    the other languages' words count only on a call held in one of them, so "SIM card" is never a Portuguese yes."""
     t = _norm(text)
     if not t:
         return "other"
@@ -154,8 +187,11 @@ def classify_reply(text: str) -> str:
         return "no"
     if _YES.match(t):
         return "other" if _HEDGE.search(t) else "yes"
-    return "other"
+    return _other_language_reply(text) if language not in ("en", "es") else "other"
 
 
 def is_stop(text: str) -> bool:
-    return bool(_STOP.match(_norm(text)))
+    if _STOP.match(_norm(text)):
+        return True
+    ws = _first_words(text)
+    return bool(ws and ws[0] in _STOP_WORDS) or (text or "").strip(_TRIM).startswith(_STOP_JA)

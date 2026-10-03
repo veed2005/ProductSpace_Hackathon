@@ -132,7 +132,7 @@ class CallController:
             await self._select(next(p for p in profiles if p.id == sess.profile_id))
         else:
             self.phase = "choose"
-            await self.say(self._t("who"))
+            await self.say(await self._t("who"))
         if is_pin and self.phase == "pin":
             await self._check_pin(first_text)
 
@@ -151,7 +151,7 @@ class CallController:
             await self._choose(text)
         elif self.phase == "pin" and len(spoken_digits(text)) != 4 and not spoken_digits(text):
             self._deferred = self._deferred or text  # "book with Dr. Smith" before the PIN
-            await self.say(self._t("pin_digits"))
+            await self.say(await self._t("pin_digits"))
         elif self.phase == "pin":
             await self._check_pin(text)
         elif self.phase == "ready":
@@ -176,21 +176,43 @@ class CallController:
 
     # ------------------------------------------------------------ identify and authorize
 
-    def _t(self, key: str, **kw) -> str:
-        return TEXT[self.language][key].format(**kw)
+    async def _t(self, key: str, **kw) -> str:
+        """One of Formline's own lines in the call's language (translated once and cached beyond English/Spanish)."""
+        if self.language in TEXT:
+            return TEXT[self.language][key].format(**kw)
+        template = await run_in_threadpool(lang_mod.phrase, self.language, f"call.{key}", TEXT["en"][key])
+        return template.format(**kw)
 
     async def _follow_language(self, text: str, hint: Optional[str]) -> None:
-        """Answer in the language the caller speaks: an explicit request ("in Spanish, please"), clear words, or
-        the recognizer's tag when the words lean the same way. Short replies, names and addresses ("ok",
-        "Dr. Smith", "412 Elm Street") change nothing, whatever the recognizer tagged them."""
-        lang = lang_mod.requested_switch(text)
+        """Answer in the language the caller speaks. In order: an explicit request ("in Hindi, please"); the
+        letters themselves (Devanagari, Cyrillic, Japanese); the recognizer's tag for a language the word lists
+        don't know; clear English or Spanish words. Short replies, names and addresses ("ok", "Dr. Smith",
+        "412 Elm Street") change nothing, whatever the recognizer tagged them."""
+        lang = lang_mod.requested_call_switch(text) or lang_mod.detect_script(text)
         if not lang:
+            long_enough = len(text.split()) >= 3
             by_words, sure = lang_mod.detect(text)
-            hinted = lang_mod.from_hint(hint) if get_settings().voice_autodetect else None
-            lang = by_words if sure or (by_words == hinted and len(text.split()) >= 3) else None
-        if lang not in TEXT:
+            hinted = lang_mod.from_hint(hint, lang_mod.CALL_LANGUAGES) if get_settings().voice_autodetect else None
+            if hinted not in (None, "en", "es"):
+                lang = hinted if long_enough else None
+            elif self.language in ("en", "es"):
+                lang = by_words if sure or (by_words == hinted and long_enough) else None
+            else:  # the word lists only know English and Spanish, and misread French or Dutch as one of them
+                lang = by_words if (sure and hinted in (None, by_words)) and long_enough else None
+        if lang not in lang_mod.CALL_LANGUAGES:
             return
         self._heard_language = True
+        await self._set_language(lang)
+
+    async def _model_language(self, lang: str, utterance: str) -> None:
+        """The agent model named the language of the caller's latest message. Taken only for a real sentence, and
+        never against the letters themselves."""
+        if lang not in lang_mod.CALL_LANGUAGES or len(utterance.split()) < 3 or lang_mod.detect_script(utterance):
+            return
+        self._heard_language = True
+        await self._set_language(lang)
+
+    async def _set_language(self, lang: str) -> None:
         if lang == self.language:
             return
         self.language = lang
@@ -217,19 +239,20 @@ class CallController:
             await self._select(match)
         else:
             names = ", ".join(p.display_name or "Unnamed" for p in profiles)
-            await self.say(self._t("who_again", names=names))
+            await self.say(await self._t("who_again", names=names))
 
     async def _select(self, profile, *, quiet_pin: bool = False) -> None:
         self.profile = profile
         self._saved_language = profile.preferred_language
         if not self._heard_language:  # otherwise they already spoke on this call: keep that language
-            self.language = profile.preferred_language if profile.preferred_language in TEXT else "en"
+            saved = profile.preferred_language
+            self.language = saved if saved in lang_mod.CALL_LANGUAGES else "en"
         if self._on_language:  # a shared phone starts in English; speak this person's language from here
             await self._on_language(self.language)
         sess = await run_in_threadpool(identity.get_session, self.phone)
         await run_in_threadpool(identity.select_profile, sess, profile.id)
         if not profile.pin_hash:
-            await self.say(self._t("pin_none"))
+            await self.say(await self._t("pin_none"))
             await self._hang_up()
             return
         sess = await run_in_threadpool(identity.get_session, self.phone)
@@ -238,26 +261,26 @@ class CallController:
         else:
             self.phase = "pin"
             if not quiet_pin:  # the opening text already was the PIN
-                await self.say(self._t("pin_sms" if self.channel == "sms" else "pin", name=profile.display_name or ""))
+                await self.say(await self._t("pin_sms" if self.channel == "sms" else "pin", name=profile.display_name or ""))
 
     async def _check_pin(self, text: str) -> None:
         digits = spoken_digits(text)
         if len(digits) != 4:
-            await self.say(self._t("pin_digits"))
+            await self.say(await self._t("pin_digits"))
             return
         sess = await run_in_threadpool(identity.get_session, self.phone)
         result = await run_in_threadpool(identity.verify_pin, sess, digits)
         if result.ok:
             await self._ready()
         elif result.status == "locked":
-            await self.say(self._t("pin_locked"))
+            await self.say(await self._t("pin_locked"))
             await self._hang_up()
         elif result.status == "no_pin":
-            await self.say(self._t("pin_none"))
+            await self.say(await self._t("pin_none"))
             await self._hang_up()
         else:
             tries = "try" if result.attempts_left == 1 else "tries"
-            await self.say(self._t("pin_wrong", left=result.attempts_left, tries=tries))
+            await self.say(await self._t("pin_wrong", left=result.attempts_left, tries=tries))
 
     async def _hang_up(self) -> None:
         self.phase = "done"
@@ -281,14 +304,15 @@ class CallController:
         conn = self._pick_browser()
         name = self.profile.display_name or ""
         if conn is None:
-            await self.say(self._t("no_browser"))
+            await self.say(await self._t("no_browser"))
             return False
         self.conn = conn
         port = ConnectionPort(conn)
         if self.agent is None:
             self.agent = BrowserAgent(browser=port, say=self.say, profile_id=self.profile.id,
                                       installation_id=conn.installation_id, phone=self.phone, channel=self.channel,
-                                      language=self.language, decide=self._decide)
+                                      language=self.language, decide=self._decide,
+                                      on_language=self._model_language)
         else:
             self.agent.browser = port  # same task, new connection
         if not greet:
@@ -298,14 +322,14 @@ class CallController:
             site = site_name(state)
             if self._deferred:
                 goal, self._deferred = self._deferred, None
-                await self.say(self._t("see_working", name=name, site=site))
+                await self.say(await self._t("see_working", name=name, site=site))
                 await self.agent.handle(goal)
             elif reconnected:
-                await self.say(self._t("browser_back") + " " + self._t("see", site=site))
+                await self.say(await self._t("browser_back") + " " + await self._t("see", site=site))
             else:
-                await self.say(self._t("see_ready", name=name, site=site))
+                await self.say(await self._t("see_ready", name=name, site=site))
         except (PageUnavailable, BrowserGone):
-            await self.say(self._t("no_page", name=name))
+            await self.say(await self._t("no_page", name=name))
         return True
 
     def _browser_connected(self, conn: BrowserConnection) -> None:
