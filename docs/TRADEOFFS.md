@@ -105,3 +105,21 @@ Format: decision, alternatives considered, why.
 
 **A pre-flight script checks the demo setup instead of a printed checklist alone.**
 - Why: the failures that sink live demos are configuration (stale ngrok URL, Twilio webhook pointing at yesterday's tunnel, dev endpoint left on, key missing). Each is a few lines to check automatically, and the script prints the fix.
+
+**Demo forms are all Illinois: IDHS IL444-0683 (SNAP), HFS 2378H (Medicaid), ISBE 68-06 (school meals).**
+- Alternatives: the combined IL444-2378B (cash + medical + SNAP, 20 pages); USDA's prototype school meals form; other states' Medicaid renewals.
+- Why: same state means the same household, income and address questions, so memory reuse is obvious on stage. All three are fillable AcroForms (two are XFA hybrids, which `fill_pdf` handles), and SNAP-only 0683 is half the length of 2378B. Illinois has no blank Medicaid renewal form (renewals are mailed pre-filled, and DC/Ohio renewals we found are flat scans), so the HFS 2378H medical benefits application stands in for "Medicaid renewal"; its aliases include "Medicaid renewal".
+
+**The SNAP schema is 27 hand-picked fields, not the form's 367.**
+- Why: a phone conversation can't ask 367 questions. We ask what decides eligibility and benefit size (household, income, rent) plus contact details, and leave the rest (immigration table, race, signature) for the caseworker. Yes/No answers map to on-states by button position, because this form names them inconsistently ("0" is Yes on most rows and No on others).
+
+**Gaps in the SNAP schema we accepted for now.**
+- The applicant's name is written once (page 1), not again in row 1 of the household table, because a schema field maps to one PDF field. An additive `also_pdf_fields` on `FormField` would fix it.
+- The household member's name box isn't mapped to memory: it wants "Last, First" in one box, and memory stores first/last separately with no formatter for a list item's full name. Asked Lane D for one.
+- The SSN box gets whatever Lane A writes for the last 4 (e.g. "XXX-XX-1234"); full SSNs are never collected.
+
+**`match_form` matches whole words, longest alias first, accents ignored.**
+- Why: substring matching made "EBT" match "medical debt" and "SNAP" match "snapshot". Longest-first lets a specific alias ("school lunch") beat a generic one, and accent folding lets "almuerzo gratis" match "almuerzo gratís" typed on a phone.
+
+**`fill_pdf` writes button states as raw PDF names.**
+- Why: pymupdf decodes escaped names when writing, so the school meals form's "Hispanic#2FLatino" became /Hispanic/Latino and the radio showed blank in every viewer. We set /AS and /V ourselves after pymupdf's update.

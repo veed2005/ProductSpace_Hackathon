@@ -1,6 +1,8 @@
 """Form library: forms/<form_id>/{form.pdf, schema.json, meta.json}. Owner: Lane C."""
 
 import json
+import re
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -43,10 +45,22 @@ def save_schema(schema: FormSchema) -> None:
 
 
 def match_form(text: str) -> Optional[str]:
-    """Cheap alias match. TODO(Lane C): LLM-assisted matching for fuzzy requests."""
-    t = text.lower()
+    """Cheap alias match on whole words ("EBT" must not match "debt"); the longest matching
+    alias wins, so "school lunch" beats a shorter alias of another form.
+
+    TODO(Lane C, C4): LLM-assisted matching for fuzzy requests.
+    """
+    t = _fold(text)
+    best: tuple[int, Optional[str]] = (0, None)
     for meta in list_forms():
         for name in [meta.name, meta.form_id, *meta.aliases]:
-            if name.lower() in t:
-                return meta.form_id
-    return None
+            alias = _fold(name)
+            if alias and len(alias) > best[0] and re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", t):
+                best = (len(alias), meta.form_id)
+    return best[1]
+
+
+def _fold(s: str) -> str:
+    """Lowercase, drop accents, collapse whitespace: "Almuerzo  Gratis" == "almuerzo gratis"."""
+    s = unicodedata.normalize("NFKD", s.casefold())
+    return " ".join("".join(c for c in s if not unicodedata.combining(c)).split())

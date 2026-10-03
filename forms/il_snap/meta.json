@@ -1,0 +1,21 @@
+{
+  "form_id": "il_snap",
+  "name": "Illinois SNAP Application",
+  "aliases": [
+    "SNAP",
+    "food stamps",
+    "food stamp",
+    "EBT",
+    "Link card",
+    "food assistance",
+    "food benefits",
+    "IL444-0683",
+    "cupones de alimentos",
+    "estampillas",
+    "estampillas de comida",
+    "beneficios de comida",
+    "tarjeta Link"
+  ],
+  "agency": "Illinois Department of Human Services (IDHS)",
+  "description": "Form IL444-0683 (R-06-17): application for the Supplemental Nutrition Assistance Program, which gives monthly money for groceries on a Link (EBT) card."
+}

@@ -5,6 +5,7 @@ logical form field: a radio group, or a text field repeated on several pages, is
 with several widgets.
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -109,7 +110,8 @@ def list_fields_in(doc: fitz.Document) -> list[PdfField]:
             if on:
                 if on not in f.options:
                     f.options.append(on)
-                if _appearance_state(doc, w.xref) == on:
+                # xref_get_key returns names decoded ("Hispanic/Latino"), on_state() does not.
+                if decode_name(_appearance_state(doc, w.xref)) == decode_name(on):
                     f.value = on
             f.widgets.append(WidgetInfo(
                 page=page.number,
@@ -137,18 +139,27 @@ def _as_text(value) -> str:
 def checkbox_state(value: str, on_state: str) -> str | None:
     """Map a checkbox value to on_state or "Off". None if the value is not recognizable."""
     v = str(value).strip()
-    if v.casefold() == on_state.casefold() or v.casefold() in CHECKED_WORDS:
+    if v.casefold() in (on_state.casefold(), decode_name(on_state).casefold()) or v.casefold() in CHECKED_WORDS:
         return on_state
     if v.casefold() in UNCHECKED_WORDS:
         return OFF
     return None
 
 
+def decode_name(name: str) -> str:
+    """PDF names escape characters as #xx: "Not#20Hispanic#2FLatino" -> "Not Hispanic/Latino"."""
+    return re.sub(r"#([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), name)
+
+
 def button_state(f: PdfField, value: str) -> str | None:
-    """Map a value to one of a checkbox/radio field's states ("Off" included). None if no match."""
+    """Map a value to one of a checkbox/radio field's states ("Off" included). None if no match.
+
+    Accepts the on-state as stored in the PDF or in readable form ("Hispanic/Latino" for
+    "Hispanic#2FLatino"); always returns the stored form.
+    """
     v = str(value).strip().casefold()
     for on in f.on_states:
-        if v == on.casefold():
+        if v in (on.casefold(), decode_name(on).casefold()):
             return on
     if f.type == "checkbox" and len(set(f.on_states)) == 1:
         return checkbox_state(value, f.on_states[0])

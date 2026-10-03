@@ -109,6 +109,13 @@ def test_checkbox_values(form_pdf, tmp_path, value, state):
     assert verify_pdf(out, {"employed": value}).ok
 
 
+def test_decode_name():
+    from app.pdf.fields import decode_name
+
+    assert decode_name("Not#20Hispanic#2FLatino") == "Not Hispanic/Latino"
+    assert decode_name("Yes") == "Yes"
+
+
 def test_wrong_checkbox_fails(form_pdf, tmp_path):
     out = fill_pdf(form_pdf, {"employed": "Yes"}, tmp_path / "out.pdf")
     result = verify_pdf(out, {"employed": "Off"})

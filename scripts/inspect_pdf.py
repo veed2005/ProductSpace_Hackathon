@@ -13,7 +13,7 @@ from pathlib import Path
 import pymupdf as fitz
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from app.pdf.fields import FF_READ_ONLY, FF_REQUIRED, has_xfa, list_fields_in  # noqa: E402
+from app.pdf.fields import FF_READ_ONLY, FF_REQUIRED, decode_name, has_xfa, list_fields_in  # noqa: E402
 
 
 def main() -> None:
@@ -49,7 +49,7 @@ def main() -> None:
         print(f"\n{f.name}")
         print(f"  type: {f.type}" + (f"  [{', '.join(flags)}]" if flags else ""))
         if f.type in ("checkbox", "radio"):
-            print(f"  on-values: {', '.join(f.on_states)}")
+            print(f"  on-values: {', '.join(decode_name(s) for s in f.on_states)}")
         elif f.options:
             print(f"  options: {', '.join(f.options)}")
         if f.max_length:
@@ -59,7 +59,7 @@ def main() -> None:
         for w in f.widgets:
             rect = ", ".join(f"{v:.0f}" for v in w.rect)
             size = f"{w.font_size:g}pt" if w.font_size else "auto"
-            on = f"  on={w.on_state}" if w.on_state else ""
+            on = f"  on={decode_name(w.on_state)}" if w.on_state else ""
             print(f"  page {w.page + 1}  rect ({rect})  font {w.font} {size}{on}")
 
 
