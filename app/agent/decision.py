@@ -11,21 +11,25 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel
 
-from app.browser.protocol import ActionName
+# What the model may do. `navigate` (typing an address) is deliberately left out: the agent uses the site's
+# own links, buttons and search box, so the person sees each step and nothing is guessed.
+AgentAction = Literal["click", "type", "clear", "select", "check", "uncheck", "press_enter", "scroll",
+                      "go_back", "focus"]
 
 
 class Step(BaseModel):
-    action: ActionName
-    element_id: Optional[str]  # an id from the current snapshot; null for scroll / go_back / navigate
-    value: Optional[str]  # text to type, option to select, scroll direction, or same-site URL
+    action: AgentAction
+    element_id: Optional[str]  # an id from the current snapshot; null for scroll / go_back
+    value: Optional[str]  # text to type, option to select, or scroll direction
 
 
 class Decision(BaseModel):
     # act: run `steps` (1-3, nothing consequential)        ask_user: ask the caller one question
     # confirm: `steps` holds the single consequential step  done: the page shows the goal is achieved
+    # answer: reply to the caller's question from what the page/document says (conversation continues)
     # blocked: the person must do something at the computer (login, CAPTCHA, code) or it can't be done
-    kind: Literal["act", "ask_user", "confirm", "done", "blocked"]
+    kind: Literal["act", "ask_user", "confirm", "done", "answer", "blocked"]
     steps: list[Step]
     say: str  # spoken to the caller: status, question, confirmation summary, or result
     reason: str  # one short sentence for the partner dashboard; no personal details
-    evidence: Optional[str]  # for done: exact text on the current page that proves success
+    evidence: Optional[str]  # done/answer: exact text on the current page or document that supports it

@@ -16,6 +16,8 @@
         if (msg.action === "get_page_state") {
           await waitForBody();
           sendResponse({ ok: true, data: FormlineObserver.snapshot() });
+        } else if (msg.action === "read_pdf") {
+          sendResponse(await readPdf());
         } else if (msg.action === "overlay") {
           FormlineExecutor.showOverlay(msg.args && msg.args.text);
           sendResponse({ ok: true, data: {} });
@@ -28,6 +30,25 @@
     })();
     return true; // async response
   });
+
+  // The PDF this tab shows, as base64. Fetched from the page itself, so a PDF behind a login comes with the
+  // person's own session; nothing else (no cookies) is sent anywhere.
+  const MAX_PDF_BYTES = 10 * 1024 * 1024;  // base64 must fit in the server's 16 MiB websocket message
+  async function readPdf() {
+    if (document.contentType !== "application/pdf") return { ok: false, error: "invalid_action", detail: "This tab isn't a PDF." };
+    if (location.protocol === "file:") return { ok: false, error: "needs_worker", detail: "local file" };
+    const res = await fetch(location.href, { credentials: "include" });
+    if (!res.ok) return { ok: false, error: "failed", detail: "The PDF couldn't be downloaded (HTTP " + res.status + ")." };
+    const blob = await res.blob();
+    if (blob.size > MAX_PDF_BYTES) return { ok: false, error: "too_large", detail: "The PDF is over 10 MB." };
+    const dataUrl = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+      r.readAsDataURL(blob);
+    });
+    return { ok: true, data: { pdf_base64: String(dataUrl).split(",", 2)[1], size: blob.size, url: location.href } };
+  }
 
   // Tell the service worker about meaningful page changes, at most every 1.5 s.
   let timer = null;

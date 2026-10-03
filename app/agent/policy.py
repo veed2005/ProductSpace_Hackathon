@@ -53,13 +53,6 @@ def validate_step(step: Step, page: PageState) -> Optional[str]:
     elif step.action == "scroll":
         if (step.value or "down").lower() not in SCROLL_VALUES:
             return "scroll value must be up, down, top or bottom"
-    elif step.action == "navigate":
-        target = urlparse(step.value or "")
-        here = urlparse(page.url)
-        if target.scheme and (target.scheme, target.netloc) != (here.scheme, here.netloc):
-            return "navigate may only go to pages on the same website"
-        if not step.value:
-            return "navigate needs a same-site address"
     return None
 
 

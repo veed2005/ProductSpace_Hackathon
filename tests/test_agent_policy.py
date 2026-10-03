@@ -42,10 +42,12 @@ def test_action_must_fit_the_element(step, element, problem):
     assert problem in validate_step(step, page(element))
 
 
-def test_navigation_stays_on_the_same_site():
+def test_the_model_cannot_type_web_addresses():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        S("navigate", None, "https://evil.example/steal")
     p = page(url="https://portal.test/a")
-    assert validate_step(S("navigate", None, "https://evil.example/steal"), p)
-    assert validate_step(S("navigate", None, "/appointments"), p) is None
     assert validate_step(S("scroll", None, "sideways"), p)
     assert validate_step(S("scroll", None, "down"), p) is None
 
@@ -135,3 +137,7 @@ def test_page_text_and_friendly_site_name():
     assert site_name(p) == "MyChart"
     assert site_name(page(title="Home", url="https://www.cityofspringfield.gov/")) == "Cityofspringfield"
     assert site_name(page(title="", url="http://localhost:8000/")) == "a web page"
+    assert site_name(page(title="Just a moment...", url="https://letterboxd.com/")) == "Letterboxd"
+    assert site_name(page(title="\u200eLinky’s profile • Letterboxd", url="https://letterboxd.com/x/")) == "Letterboxd"
+    assert site_name(page(title="Reelbox • Social film discovery", url="http://127.0.0.1:8000/x")) == "Reelbox"
+    assert site_name(page(title="Your appointment is scheduled - MyRiverbend", url="http://localhost/")) == "MyRiverbend"

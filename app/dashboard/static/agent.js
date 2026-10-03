@@ -27,6 +27,7 @@
       scroll: ["✓", `Scrolled ${esc(V || "down")}`], go_back: ["✓", "Went back a page"],
       navigate: ["✓", `Opened ${esc(V)}`], focus: ["✓", `Focused ${q(L)}`],
       ask: ["?", `Asked the caller: ${q(L)}`], confirm_request: ["⏸", `Asked to confirm: ${q(V)}`],
+      answer: ["💬", `Answered: ${q(L)}` + (V ? `<div class="why">From the page: ${q(V)}</div>` : "")],
       confirmed: ["✔", `Caller said yes to ${q(L)}`], declined: ["✋", `Not done: ${esc(a.reason || "caller declined")}`],
       confirm_stale: ["↺", "Page changed after the yes, so nothing was pressed"],
       verified: ["🏁", `Success verified on the page: ${q(L)}`],
@@ -34,11 +35,11 @@
       blocked: ["⚠", `Needs the person at the computer: ${q(L)}`], stopped: ["■", "Stopped by the caller"],
     };
     let [icon, text] = rows[a.kind] || ["•", esc(a.kind)];
-    let cls = { "?": "ask", "⏸": "confirm", "✔": "ok", "🏁": "done", "✗": "bad", "⚠": "bad", "✋": "stopped", "■": "stopped", "↺": "bad" }[icon] || "ok";
+    let cls = { "💬": "ask", "?": "ask", "⏸": "confirm", "✔": "ok", "🏁": "done", "✗": "bad", "⚠": "bad", "✋": "stopped", "■": "stopped", "↺": "bad" }[icon] || "ok";
     if (!a.ok && icon === "✓") { icon = "✗"; cls = "bad"; text += ` <span class="err">failed: ${esc(a.error)}</span>`; }
     else if (a.error) text += ` <span class="err">${esc(a.error)}</span>`;
     const ms = a.latency_ms != null ? `<span class="ms">${a.latency_ms} ms</span>` : "";
-    const why = a.reason && !["ask", "declined"].includes(a.kind) ? `<div class="why">${esc(a.reason)}</div>` : "";
+    const why = a.reason && !["ask", "declined", "answer"].includes(a.kind) ? `<div class="why">${esc(a.reason)}</div>` : "";
     return `<li class="act ${cls}"><span class="icon">${icon}</span><div class="what">${text}${why}</div>${ms}</li>`;
   }
 

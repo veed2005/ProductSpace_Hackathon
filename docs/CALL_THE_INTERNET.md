@@ -54,6 +54,10 @@ uv run uvicorn app.main:app               # http://localhost:8000
 
 Also try: "**Stop**" mid-task (halts immediately), "**No**" at the confirmation (nothing is submitted), or the second site, http://localhost:8000/demo/library/index.html: "Can you renew my library book, The Overstory?"
 
+**PDFs:** open any PDF in Chrome (try http://localhost:8000/demo/testbench/lease.pdf) and ask about it: "I don't understand this contract", "Can I have a dog?", "How do I get out of my lease early?". Formline reads the whole document, every page, and each answer is backed by a quote from it (shown on the dashboard). PDFs saved on the computer (`file://`) need one switch: chrome://extensions → Formline → Details → **Allow access to file URLs**. Limits: 10 MB per PDF; about 250,000 characters of text (roughly 150 pages) are read; scanned PDFs with no text layer are read as pictures of their first 8 pages.
+
+**Searching sites:** "Look up Avengers" uses the site's own search box, clicking a hidden search icon first if needed (http://localhost:8000/demo/reelbox/index.html is a Letterboxd-like test site). The agent can't type web addresses, and a new request never inherits details (like which movie) from an earlier one; it asks.
+
 Reset between rehearsals: the portal's footer has **Reset demo data**; the dashboard's **Demo → Reset** wipes Formline's side.
 
 **If something fails on stage:** text the number instead (texting drives the browser the same way); or run `scripts/call_sim.py` on screen next to the dashboard.
@@ -71,7 +75,9 @@ Reset between rehearsals: the portal's footer has **Reset demo data**; the dashb
 | Dashboard | `app/dashboard/agent_api.py`, `static/agent.js` | Agent tab: browsers, live action feed, pending confirmation, call transcript, "what Formline sees". |
 | Demo sites | `demo_sites/` | Riverbend Health portal (5-step scheduling wizard), Maple County Library (multi-page renewals), privacy testbench. Fake data only. |
 
-The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `confirm` (the one final step, with a spoken summary), `done` (with quoted evidence), or `blocked` (the person must do something at the computer). Actions: `click, type, clear, select, check, uncheck, press_enter, scroll, go_back, navigate (same site only), focus`. **There is no "run JavaScript" action.**
+The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `confirm` (the one final step, with a spoken summary), `done` (with quoted evidence), `answer` (a reply about the page or document, with quoted evidence; the conversation continues), or `blocked` (the person must do something at the computer). Actions: `click, type, clear, select, check, uncheck, press_enter, scroll, go_back, focus`. **There is no "run JavaScript" action, and no typing of web addresses.**
+
+**PDFs:** Chrome's PDF viewer is invisible to page snapshots, so on a PDF tab the content script downloads the file from the page itself (same origin, with the person's own session; nothing else leaves the browser) and the server extracts every page with PyMuPDF (`app/browser/pdf.py`), masking SSN- and card-shaped numbers. The whole text goes into the model's view of the page, first in the prompt so follow-up questions about the same document can reuse the provider's prompt cache.
 
 ## Safety and privacy
 
@@ -96,6 +102,9 @@ The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `
 | Page still loading | The agent waits for loading text, `aria-busy`, or "Scheduling…"-style buttons to clear (up to ~6 s). |
 | Form validation error | Shown in the snapshot (`INVALID`, alert text); the model fixes it. |
 | Link opens a new tab | The extension follows it and the task continues there. |
+| PDF can't be read | Too big, password-protected, or a local file without "Allow access to file URLs": the agent says which, and how to fix it. |
+| A bot check ("Just a moment...") | The greeting names the site from its address, and the agent asks the person to complete the check. |
+| An answer quotes text that isn't there | Rejected and retried; a summary may stitch several real quotes, but every piece must be in the page or document. |
 | Model error or cut-off output | One automatic retry; then "Sorry, something went wrong…". |
 | Stuck after 3 errors, or 16 decisions | Says so and asks the caller how to proceed. |
 | Caller hangs up | The task is marked interrupted; nothing else runs. |
@@ -103,21 +112,25 @@ The model answers with one of: `act` (1–3 steps), `ask_user` (one question), `
 ## Testing
 
 ```bash
-uv run pytest                                              # 369 offline tests (fake browser, scripted model)
+uv run pytest                                              # 383 offline tests (fake browser, scripted model)
 uv run python scripts/extension_smoke.py                   # real Chromium: pairing, actions, stale ids, privacy, screenshot
 uv run python scripts/e2e_golden_path.py --runs 3          # real model + Chromium + call simulator, golden demo
 uv run python scripts/e2e_golden_path.py --scenario library
+uv run python scripts/e2e_golden_path.py --scenario pdf             # 4 questions about a 6-page lease
+uv run python scripts/e2e_golden_path.py --scenario reelbox         # "Look up Avengers" must use the search box
+uv run python scripts/e2e_golden_path.py --scenario reelbox_vague   # "Look up a movie" must ask which one
 uv run python scripts/agent_bench.py trace.jsonl --models gpt-5.4-mini,gpt-4.1-mini   # compare models on recorded prompts
 ```
 
 `FORMLINE_AGENT_TRACE=trace.jsonl` records every agent prompt and decision (local debugging only: it contains page text and what the caller said).
 
-Latest live results (2026-10-03, `gpt-5.4-mini`, simulated caller): golden demo 11 consecutive runs passed, 19–26 s per call end to end, 10 browser steps and 12 model calls each; library renewal 4 consecutive runs passed, 7–10 s, 4 model calls. Each model decision takes about 0.8–1 s; the longest wait for the caller is the first turn (about 7 s, three pages deep), covered by "One moment" and a short status line.
+Latest live results (2026-10-03, `gpt-5.4-mini`, simulated caller): golden demo 3/3 (19–22 s per call, 10 browser steps, 12–13 model calls); library renewal 3/3 (about 10 s, 4 browser steps); PDF questions 3/3 (every answer correct and quoted, about 1 s each); site search 3/3 and vague lookup 3/3. Real letterboxd.com blocks automated browsers with a bot check, so it's covered by the Reelbox test site and by hand. Each model decision takes about 0.8–1 s; the longest wait for the caller is the first turn (about 7 s, three pages deep), covered by "One moment" and a short status line.
 
 ## Known limits and next steps
 
 - Formline acts on the active tab of the most recently used browser; with several paired browsers it picks the most recently active one rather than asking.
 - Custom widgets with no accessible name and no visible text can't be targeted yet; the screenshot fallback helps the model understand them but there is no click-by-coordinates action (deliberately).
 - Iframes (including cross-origin) aren't read.
+- PDFs over 10 MB, or past about 250,000 characters of text, are cut off; the agent says so.
 - Twilio ConversationRelay plays queued status lines in order; a long status can delay a question by a second or two.
 - The real phone path is the same code as the simulator, but it still needs one live run with the team's Twilio number and ngrok.

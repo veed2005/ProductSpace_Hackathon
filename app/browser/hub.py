@@ -14,7 +14,10 @@ from typing import Any, Callable, Optional
 
 from fastapi import WebSocket
 
-from app.browser.protocol import ActionResult, PageState
+from fastapi.concurrency import run_in_threadpool
+
+from app.browser import pdf
+from app.browser.protocol import ActionResult, PageState, PdfDocument
 from app.browser.sanitize import sanitize_page
 from app.events import publish
 
@@ -39,6 +42,7 @@ class BrowserConnection:
         self.closed = False
         self._pending: dict[str, asyncio.Future] = {}
         self._cache: Optional[PageState] = None
+        self._pdfs: dict[str, PdfDocument] = {}
         self._on_close: list[Callable[[BrowserConnection], None]] = []
         self._send_lock = asyncio.Lock()
 
@@ -111,8 +115,28 @@ class BrowserConnection:
         if not msg.get("ok"):
             raise PageUnavailable(msg.get("error") or "unknown", msg.get("detail"))
         state = sanitize_page(PageState.model_validate(msg["data"]))
+        if state.content_type == "application/pdf":
+            state.document = await self._pdf(state)
+            state.site_name = pdf.friendly_name(state.document)
+            state.title = state.title or state.document.title
         self._cache = state
         return state
+
+    async def _pdf(self, state: PageState) -> PdfDocument:
+        """The whole PDF this tab shows, read once per address and kept while the connection lasts."""
+        cached = self._pdfs.get(state.url)
+        if cached is not None:
+            return cached
+        msg = await self.request("read_pdf", tab_id=state.tab_id, timeout=45)
+        if not msg.get("ok"):
+            return PdfDocument(title=pdf.friendly_name(PdfDocument()), error=msg.get("detail") or "It couldn't be downloaded.")
+        data = pdf.decode(msg["data"]["pdf_base64"])
+        document = await run_in_threadpool(pdf.read, data, state.url)
+        if not document.error:
+            self._pdfs[state.url] = document
+            while len(self._pdfs) > 4:
+                self._pdfs.pop(next(iter(self._pdfs)))
+        return document
 
     async def act(self, action: str, *, tab_id: Optional[int], doc_id: Optional[str] = None,
                   element_id: Optional[str] = None, value: Optional[str] = None) -> ActionResult:

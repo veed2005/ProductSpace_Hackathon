@@ -2,6 +2,8 @@
 
     uv run python scripts/e2e_golden_path.py                         # the golden demo (book with Dr. Smith)
     uv run python scripts/e2e_golden_path.py --scenario library      # a different site: renew a library book
+    uv run python scripts/e2e_golden_path.py --scenario pdf          # questions about a 6-page PDF lease
+    uv run python scripts/e2e_golden_path.py --scenario letterboxd   # the real letterboxd.com: search for a film
     uv run python scripts/e2e_golden_path.py --runs 3 --headed --screenshots out/
 
 Each run: start an isolated Formline server, launch Chromium with the extension, pair it through the
@@ -59,7 +61,53 @@ async def library_checks(page) -> dict:
     }
 
 
+async def letterboxd_checks(page) -> dict:
+    return {"ended on a search result or film page": any(p in page.url for p in ("/search", "/film"))}
+
+
 SCENARIOS = {
+    "pdf": {
+        "path": "/demo/testbench/lease.pdf",
+        "site_word": "Lease",
+        "opening": "I don't understand this contract. Can you help me?",
+        # (question, every one of these must be in the answer: alternatives separated by |)
+        "questions": [
+            ("Can I have a dog?", ["40|forty", "300|three hundred"]),
+            ("How do I get out of my lease early?", ["60|sixty", "1,450|one month|fourteen hundred"]),
+            ("Who signed it for the landlord?", ["Dana|Whitfield"]),
+            ("What happens if I pay rent late?", ["75|seventy-five|seventy five"]),
+        ],
+    },
+    "reelbox": {
+        "path": "/demo/reelbox/index.html",
+        "site_word": "Reelbox",
+        "opening": "Look up Avengers.",
+        "done": r"\b(found|here|showing|results?|opened|open)\b",
+        "checks": letterboxd_checks,
+        "must_type": "avengers",
+        "persona": """You are Evan, a film fan. You want to look up the Avengers. If asked which one, say the \
+original one from 2012. Keep answers short.""",
+    },
+    "reelbox_vague": {
+        "path": "/demo/reelbox/index.html",
+        "site_word": "Reelbox",
+        "opening": "Can you look up a movie for me?",
+        "done": r"\b(found|here|showing|results?|opened|open)\b",
+        "checks": letterboxd_checks,
+        "must_type": "paddington",
+        "persona": """You are Evan, a film fan. The movie you want is Paddington 2. If asked which movie, say \
+Paddington 2. Keep answers short.""",
+    },
+    "letterboxd": {
+        "path": "https://letterboxd.com/",
+        "site_word": "Letterboxd",
+        "opening": "Look up Avengers on Letterboxd.",
+        "done": r"\b(found|here|showing|results?|opened|open)\b",
+        "checks": letterboxd_checks,
+        "must_type": "avengers",
+        "persona": """You are Evan, using Letterboxd. You want to look up the Avengers films. If asked which \
+one, say the first Avengers movie from 2012. If asked anything else, keep it short.""",
+    },
     "riverbend": {
         "path": "/demo/riverbend/",
         "site_word": "Riverbend",
@@ -110,10 +158,12 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
     try:
         await pair_async(context, ext, server.url, phone=PHONE.format(run), name="Margaret", pin=PIN)
         page = await context.new_page()
-        await page.goto(server.url + scenario["path"])
-        await page.evaluate("localStorage.clear()")
-        await page.reload()
-        await page.wait_for_selector("h1")
+        external = scenario["path"].startswith("http")
+        await page.goto(scenario["path"] if external else server.url + scenario["path"])
+        if not external and not scenario["path"].endswith(".pdf"):
+            await page.evaluate("localStorage.clear()")
+            await page.reload()
+            await page.wait_for_selector("h1")
         await page.bring_to_front()
         await asyncio.sleep(1.0)
 
@@ -146,6 +196,8 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
 
             await say(scenario["opening"])
             t0 = time.monotonic()
+            if scenario.get("questions"):
+                return await qa_run(scenario, hear, say, transcript, server, started)
             for _ in range(30):
                 line = await hear()
                 if not line:
@@ -174,16 +226,52 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
 
         db = sqlite3.connect(server.data_dir / "formline.db")
         status = db.execute("select status, steps, model_calls from browsertask order by id desc limit 1").fetchone()
-        actions = db.execute("select kind, element_label, ok from browseraction where task_id = "
+        actions = db.execute("select kind, element_label, ok, value from browseraction where task_id = "
                              "(select max(id) from browsertask) order by id").fetchall()
         db.close()
         checks["task verified complete"] = bool(status) and status[0] == "completed"
-        checks["confirmation asked before the final step"] = any(k == "confirm_request" for k, _, _ in actions)
+        if scenario.get("must_type"):
+            # A lookup may end by answering from the page (with a verified quote) instead of "done".
+            checks["task verified complete"] = checks["task verified complete"] or any(
+                k == "answer" and v for k, _, _, v in actions)
+            checks[f"typed {scenario['must_type']!r} into the site's search"] = any(
+                k == "type" and scenario["must_type"] in (v or "").lower() for k, _, _, v in actions)
+        else:
+            checks["confirmation asked before the final step"] = any(k == "confirm_request" for k, _, _, _ in actions)
         return {"checks": checks, "total_s": round(total, 1), "turn_s": [round(t, 1) for t in turn_times],
                 "steps": status[1] if status else None, "model_calls": status[2] if status else None,
                 "actions": actions}
     finally:
         await context.close()
+
+
+async def qa_run(scenario, hear, say, transcript, server, started) -> dict:
+    """Ask questions about the open document; every answer must contain the expected facts."""
+    async def reply() -> tuple[str, float]:
+        t = time.monotonic()
+        while True:
+            line = await hear()
+            if line and not line.lower().startswith(("one moment", "un momento")):
+                return line, time.monotonic() - t
+
+    first, _ = await reply()  # the plain summary of the document
+    checks = {"explained the document when asked": len(first.split()) >= 12 and "trouble" not in first.lower()}
+    turn_times = []
+    for question, needles in scenario["questions"]:
+        await say(question)
+        answer, secs = await reply()
+        turn_times.append(secs)
+        low = answer.lower().replace(",", "")
+        ok = all(any(alt.lower().replace(",", "") in low for alt in n.split("|")) for n in needles)
+        checks[f"answered {question!r}"] = ok
+    db = sqlite3.connect(server.data_dir / "formline.db")
+    rows = db.execute("select kind, element_label, ok, value from browseraction where task_id = "
+                      "(select max(id) from browsertask) order by id").fetchall()
+    calls = db.execute("select model_calls from browsertask order by id desc limit 1").fetchone()
+    db.close()
+    checks["every answer quoted the document"] = sum(1 for k, _, _, v in rows if k == "answer" and v) >= len(scenario["questions"])
+    return {"checks": checks, "total_s": round(time.monotonic() - started, 1), "turn_s": [round(t, 1) for t in turn_times],
+            "steps": 0, "model_calls": calls[0] if calls else None, "actions": rows}
 
 
 async def main_async(args) -> int:

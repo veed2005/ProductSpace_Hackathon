@@ -294,8 +294,13 @@ class BrowserAgent:
             page = await self.browser.page_state()
         except (PageUnavailable, BrowserGone):
             pass
+        earlier = bool(self.goal)
         self.goal = goal
         self.history, self.notes = [], []
+        if earlier:
+            self.notes.append("This is a NEW request. Earlier conversation is context only: don't reuse details "
+                              "from earlier requests (like which movie or which date) unless the caller refers to "
+                              "them. If the new request is missing something, ask.")
         self.steps = self.model_calls = 0
         self.required_confirmation = self.confirmed_executed = False
         self.task_id = store.create_task(profile_id=self.profile_id, installation_id=self.installation_id,
@@ -318,6 +323,21 @@ class BrowserAgent:
                 self.pending = {"type": "question", "say": decision.say}
                 self._persist(status="waiting_input", pending=self.pending)
                 store.add_action(self.task_id, "ask", element_label=decision.say, reason=decision.reason)
+                await self._say(decision.say)
+                return
+
+            if kind == "answer":
+                problem = self._unsupported(decision.evidence, page) if decision.evidence else None
+                if problem:
+                    store.add_action(self.task_id, "unverified", element_label=decision.evidence, ok=False, error=problem)
+                    self.notes.append(problem)
+                    errors += 1
+                    if errors >= MAX_ERRORS:
+                        break
+                    continue
+                self._persist(status="waiting_input", pending={})
+                store.add_action(self.task_id, "answer", element_label=decision.say, value=decision.evidence,
+                                 reason=decision.reason)
                 await self._say(decision.say)
                 return
 
@@ -437,16 +457,25 @@ class BrowserAgent:
         steps = "\n".join(f"{i + 1}. {line}" for i, line in enumerate(self.history[-15:])) or "(none yet)"
         notes = "\n".join(f"- {n}" for n in self.notes) or "(none)"
         self.notes = []
-        user = (f"Caller's goal: {self.goal}\n\nConversation so far (most recent last):\n{convo}\n\n"
-                f"Steps you have taken in the browser:\n{steps}\n\nNotes for this turn:\n{notes}\n\n"
-                f"CURRENT PAGE:\n{page_text(page)}")
+        # The page comes first: a long PDF stays an identical prefix across follow-up questions, which the
+        # provider can cache.
+        user = (f"CURRENT PAGE:\n{page_text(page)}\nEND OF PAGE\n\n"
+                f"Caller's goal: {self.goal}\n\nConversation so far (most recent last):\n{convo}\n\n"
+                f"Steps you have taken in the browser:\n{steps}\n\nNotes for this turn:\n{notes}")
         content: object = user
-        image = await self._vision_fallback(page)
-        if image:
-            content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image}},
-                       {"type": "text", "text": user + "\n\nA screenshot of the visible page is attached because the "
-                        "snapshot has little text. Use it to understand the page; you can still only act on ids in "
-                        "the snapshot."}]
+        images: list[str] = list(page.document.images) if page.document else []
+        note = ""
+        if images:
+            note = "\n\nThe pictures attached are the PDF's pages, in order. Read them to answer."
+        else:
+            shot = await self._vision_fallback(page)
+            if shot:
+                images = [shot]
+                note = ("\n\nA screenshot of the visible page is attached because the snapshot has little text. "
+                        "Use it to understand the page; you can still only act on ids in the snapshot.")
+        if images:
+            content = [*({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": i}}
+                         for i in images), {"type": "text", "text": user + note}]
         started = time.perf_counter()
         try:
             decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": content}])
@@ -492,13 +521,26 @@ class BrowserAgent:
         self.history.append(f"{step.action} [{step.element_id}] {label!r}{typed} -> {outcome}{changed}")
         return result
 
+    @staticmethod
+    def _unsupported(evidence: Optional[str], page: PageState) -> Optional[str]:
+        """None if the quote is on the page (or in its document) as the model saw it, else the problem.
+        A summary may stitch several quotes with "..." or line breaks: every piece of 3+ words must be there."""
+        hay = _norm(page_text(page))
+        cleaned = re.sub(r"\[Page \d+ of \d+\]", "\n", evidence or "")
+        # Split at "...", line breaks, and sentence ends: each piece must be real, wherever it is.
+        pieces = [_norm(p) for p in re.split(r"\.\.\.|…|\n|(?<=[.!?])[\"”)]?\s+(?=[\"“(]?[A-Z0-9])", cleaned)]
+        pieces = [p for p in pieces if len(p.split()) >= 3] or [_norm(cleaned)]
+        if pieces[0] and all(p in hay for p in pieces):
+            return None
+        return (f"Your evidence {evidence!r} is not on the current page or in its document. Quote the page "
+                "exactly, or answer without evidence only if the page doesn't say.")
+
     async def _verify_done(self, decision: Decision) -> tuple[bool, str]:
         evidence = _norm(decision.evidence or "")
         if len(evidence) < 6:
             return False, "done needs evidence: copy the exact text on the current page that shows success"
         page = await self._page(fresh=True)
-        hay = _norm(" ".join([page.title] + [f"{e.label} {e.value or ''}" for e in page.elements]))
-        if evidence not in hay:
+        if self._unsupported(decision.evidence, page):
             return False, (f"Your evidence {decision.evidence!r} is not on the current page. Only use done when "
                            "the page itself shows the goal was achieved, and quote it exactly.")
         if self.required_confirmation and not self.confirmed_executed:

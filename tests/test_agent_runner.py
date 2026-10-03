@@ -293,8 +293,9 @@ def test_evidence_copied_with_snapshot_markup_still_matches():
 def test_confirm_with_several_steps_runs_the_lead_and_confirms_the_last():
     class Bundler(ScriptedModel):
         async def __call__(self, system, messages):
-            page = messages[-1]["content"].split("CURRENT PAGE:", 1)[1]
-            if "Choose a time" in page and "thursday" in messages[-1]["content"].lower().split("current page:")[0]:
+            text = messages[-1]["content"]
+            page = text.split("CURRENT PAGE:", 1)[1].split("END OF PAGE", 1)[0]
+            if "Choose a time" in page and "thursday" in text.split("END OF PAGE", 1)[1].lower():
                 self.calls += 1
                 return Decision(kind="confirm", steps=[S("check", "s2"), S("click", "next")],
                                 say="Shall I continue?", reason="bundled", evidence=None)
@@ -346,3 +347,113 @@ def test_vision_fallback_is_opt_in_and_only_for_sparse_pages(monkeypatch):
     get_settings.cache_clear()
     content = run(scenario())[0]
     assert content[0]["type"] == "image" and content[0]["source"]["data"] == "aGVsbG8="
+
+
+# ---------------------------------------------------------------- answering questions from the page
+
+def _lease_page():
+    from pathlib import Path
+
+    from app.browser import pdf
+    from app.browser.protocol import PageState
+
+    data = (Path(__file__).resolve().parent.parent / "demo_sites" / "testbench" / "lease.pdf").read_bytes()
+    doc = pdf.read(data, "https://files.example/lease.pdf")
+    return PageState(doc_id="d1", url="https://files.example/lease.pdf", title=doc.title, document=doc,
+                     content_type="application/pdf", site_name=pdf.friendly_name(doc))
+
+
+def _qa_agent(decisions, page):
+    said, seen = [], []
+
+    class Static(FakeBrowser):
+        async def page_state(self, *, fresh=False):
+            return page
+
+    async def model(system, messages):
+        seen.append(messages[-1]["content"])
+        return decisions.pop(0)
+
+    async def say(text):
+        said.append(text)
+
+    from app.core import identity
+
+    profile = identity.create_profile("+15550003333", display_name="Margaret")
+    agent = BrowserAgent(browser=Static(), say=say, profile_id=profile.id, installation_id="br",
+                         phone="+15550003333", decide=model)
+    return agent, said, seen
+
+
+def test_answers_are_grounded_in_the_document_and_the_conversation_continues():
+    decisions = [Decision(kind="answer", steps=[], say="Yes, a dog under 40 pounds, with a $300 deposit.",
+                          reason="pets", evidence="Tenant may keep up to two cats or one dog weighing under 40 pounds")]
+    agent, said, seen = _qa_agent(decisions, _lease_page())
+
+    async def scenario():
+        await agent.handle("Can I have a dog?")
+        await settle(agent)
+
+    run(scenario())
+    assert said[-1].startswith("Yes, a dog")
+    assert agent.status == "waiting_input"  # not completed: follow-up questions continue the conversation
+    assert "[Page 4 of 6]" in seen[0] and "Dana Whitfield" in seen[0]  # the whole document was in the prompt
+    assert actions("answer")[0].value.startswith("Tenant may keep")
+
+
+def test_an_answer_quoting_text_that_is_not_there_is_rejected():
+    decisions = [
+        Decision(kind="answer", steps=[], say="Yes, any pets are fine.", reason="x", evidence="All pets are welcome"),
+        Decision(kind="answer", steps=[], say="Up to two cats or one small dog.", reason="x",
+                 evidence="up to two cats or one dog weighing under 40 pounds"),
+    ]
+    agent, said, seen = _qa_agent(decisions, _lease_page())
+
+    async def scenario():
+        await agent.handle("Can I have pets?")
+        await settle(agent)
+
+    run(scenario())
+    assert "Yes, any pets are fine." not in said and said[-1].startswith("Up to two cats")
+    assert "not on the current page or in its document" in seen[1]
+
+
+def test_title_quoted_as_shown_counts_as_evidence():
+    from app.agent.runner import BrowserAgent as A
+    from app.browser.protocol import PageState
+
+    page = PageState(doc_id="d", url="https://letterboxd.com/linky/", title="\u200eLinky’s profile • Letterboxd")
+    assert A._unsupported("Title: \u200eLinky’s profile • Letterboxd", page) is None
+    assert A._unsupported("Linky’s watchlist", page)
+
+
+def test_a_new_request_does_not_inherit_details_from_the_last_one():
+    agent, portal, said = make()
+
+    async def scenario():
+        await agent.handle("Book with Dr. Smith")
+        await settle(agent)
+        agent.status = "completed"
+        await agent.handle("Look up a movie")
+        await settle(agent)
+        return agent.decide
+
+    model = run(scenario())
+    assert "This is a NEW request" in model.prompts[-1]
+
+
+def test_stitched_quotes_count_only_if_every_piece_is_real():
+    from app.agent.runner import BrowserAgent as A
+
+    page = _lease_page()
+    real = ('This Residential Lease Agreement ... between Riverside Property Management LLC ("Landlord") ... '
+            "The Lease begins on October 1, 2026 and ends on September 30, 2027. ... Monthly rent is $1,450.00")
+    assert A._unsupported(real, page) is None
+    assert A._unsupported("[Page 4 of 6]\n11. PETS. Tenant may keep up to two cats", page) is None
+    fake = "Monthly rent is $1,450.00 ... Tenant may keep any number of pets"
+    assert A._unsupported(fake, page)
+    sentences = ('Margaret Ellis ("Tenant"). The Lease begins on October 1, 2026 and ends on September 30, 2027. '
+                 "Monthly rent is $1,450.00. This Lease, with Addendum A (Parking Rules) and Addendum B (Pet Policy), "
+                 "is the entire agreement between the parties.")
+    assert A._unsupported(sentences, page) is None
+    assert A._unsupported("Monthly rent is $1,450.00. The landlord allows any pet you like.", page)

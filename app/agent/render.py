@@ -4,6 +4,7 @@ import re
 from typing import Optional
 from urllib.parse import urlparse
 
+from app.browser.pdf import describe
 from app.browser.protocol import PageElement, PageState
 
 
@@ -59,6 +60,8 @@ def page_text(state: PageState) -> str:
         head.append("A dialog is open; deal with it first.")
     if state.truncated:
         head.append("Snapshot truncated (very long page); scroll down to see the rest.")
+    if state.document is not None:
+        head.append(describe(state.document))
     return "\n".join(head + [""] + [element_line(e) for e in state.elements])
 
 
@@ -81,21 +84,38 @@ def looks_loading(state: PageState) -> bool:
     return False
 
 
-_GENERIC_TITLES = {"home", "welcome", "dashboard", "login", "sign in", "index"}
+_GENERIC_TITLES = {"home", "welcome", "dashboard", "login", "log in", "sign in", "index", "search results"}
+# Interstitials (bot checks, errors) whose titles say nothing about the site.
+_INTERSTITIAL = re.compile(r"^(just a moment|attention required|access denied|please wait|loading|checking your "
+                           r"browser|one moment|403|404|page not found|error)\b", re.IGNORECASE)
+
+
+def _host_name(url: str) -> str:
+    host = urlparse(url).hostname or ""
+    host = re.sub(r"^(www|my|portal|app)\.", "", host)
+    core = host.split(".")[0] if "." in host else host
+    if core in ("localhost", "127") or not core or core.isdigit():
+        return ""
+    return core.replace("-", " ").title()
 
 
 def site_name(state: PageState) -> str:
-    """What to call the site out loud: the site's own name if it declares one, else the most specific
-    part of the title, else a tidied host name. Never a raw URL."""
+    """What to call the site out loud: the site's own name if it declares one, else the part of the title
+    that names the site, else a tidied host name. Never a raw URL, never a bot-check page's title."""
     if state.site_name:
         return state.site_name
-    parts = [p.strip() for p in re.split(r"\s[-|–—:·]\s", state.title or "") if p.strip()]
+    title = (state.title or "").replace("\u200e", "").replace("\u200f", "").strip()
+    host = _host_name(state.url)
+    if not title or _INTERSTITIAL.search(title):
+        return host or "a web page"
+    parts = [p.strip() for p in re.split(r"\s[-|–—:·•]\s", title) if p.strip()]
     candidates = [p for p in parts if p.lower() not in _GENERIC_TITLES and len(p) <= 40]
-    if candidates:
-        return candidates[-1]  # "Appointments - MyChart" -> "MyChart"
-    host = urlparse(state.url).hostname or ""
-    host = re.sub(r"^(www|my|portal|app)\.", "", host)
-    core = host.split(".")[0] if "." in host else host
-    if core in ("localhost", "127") or not core:
-        return "a web page"
-    return core.replace("-", " ").title()
+    squash = lambda t: re.sub(r"[^a-z0-9]", "", t.lower())  # noqa: E731
+    for p in candidates:  # "Linky's profile • Letterboxd" on letterboxd.com -> "Letterboxd"
+        if host and squash(p) and (squash(p) in squash(host) or squash(host) in squash(p)):
+            return p
+    if len(candidates) > 1:  # "Appointments - MyChart", "Reelbox • Social film discovery": the short one
+        return min(candidates, key=len)
+    if host:
+        return host
+    return candidates[0] if candidates else "a web page"

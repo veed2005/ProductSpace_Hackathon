@@ -145,7 +145,20 @@
     if (img && img.alt) return img.alt;
     const svgTitle = el.querySelector("svg title");
     if (svgTitle) return (svgTitle.textContent || "").trim();
-    return el.title || el.getAttribute("name") || "";
+    return el.title || el.getAttribute("name") || iconName(el);
+  }
+
+  // Icon-only buttons (a magnifying glass, a hamburger menu) often have no text or label at all. Guess a
+  // name from class names, ids, data attributes and <use href="#icon-search">, marked as a guess.
+  const ICON_WORDS = /\b(search|menu|close|cart|basket|account|profile|user|login|log in|sign ?in|settings|notifications?|bell|home|filter|sort|share|next|prev|previous|back|forward|play|pause|download|upload|edit|delete|trash|add|plus|more|options|help|info)\b/i;
+  function iconName(el) {
+    const hints = [el.id, typeof el.className === "string" ? el.className : "", el.getAttribute("data-icon"),
+      el.getAttribute("data-testid")];
+    el.querySelectorAll("[class], use").forEach((n) => {
+      hints.push(n.getAttribute("class") || "", n.getAttribute("href") || n.getAttribute("xlink:href") || "");
+    });
+    const m = ICON_WORDS.exec(hints.join(" ").replace(/[_-]/g, " "));
+    return m ? m[1].toLowerCase().replace("log in", "login") + " (icon)" : "";
   }
 
   function groupOf(el, role) {
@@ -323,6 +336,7 @@
       truncated: elements.length > MAX_ITEMS,
       dialog_open: dialogOpen,
       busy: document.readyState !== "complete" || !!document.querySelector('[aria-busy="true"]'),
+      content_type: document.contentType || null,
       at_top: se.scrollTop <= 2,
       at_bottom: se.scrollTop + innerHeight >= se.scrollHeight - 2,
     };

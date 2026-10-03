@@ -52,7 +52,9 @@ loadConfig();
 // ---------------------------------------------------------------- which tab is "the page"
 
 function eligible(tab) {
-  if (!tab || !tab.url || !/^https?:/.test(tab.url)) return false;
+  if (!tab || !tab.url) return false;
+  if (/^file:/i.test(tab.url)) return /\.pdf($|[?#])/i.test(tab.url);  // local PDFs only
+  if (!/^https?:/.test(tab.url)) return false;
   try {
     const u = new URL(tab.url);
     const s = new URL(serverUrl);
@@ -167,7 +169,9 @@ async function waitForLoad(tabId, timeoutMs = 10000) {
   return chrome.tabs.get(tabId);
 }
 
-const NAVIGATED = /message port closed|back\/forward cache|Receiving end does not exist|context invalidated/i;
+// The page unloaded mid-action (a full navigation). Chrome words this differently across versions:
+// "message port closed", "message channel closed before a response was received", ...
+const NAVIGATED = /message (port|channel) closed|back\/forward cache|Receiving end does not exist|context invalidated/i;
 
 async function sendToTab(tabId, payload, { inject = true } = {}) {
   try {
@@ -204,6 +208,23 @@ async function run(action, args, tabId) {
     }
     if (!res.ok) throw err(res.error, res.detail);
     return { ...res.data, tab_id: tab.id };
+  }
+
+  if (action === "read_pdf") {
+    if (tab.status === "loading") tab = await waitForLoad(tab.id);
+    const res = await sendToTab(tab.id, { kind: "formline", action });
+    if (res.ok) return res.data;
+    if (res.error !== "needs_worker") throw err(res.error, res.detail);
+    // A PDF on this computer (file://): only readable if the person allowed file access for Formline.
+    if (!(await chrome.extension.isAllowedFileSchemeAccess())) {
+      throw err("file_access", "To read files on this computer, turn on \"Allow access to file URLs\" for Formline in chrome://extensions.");
+    }
+    const blob = await (await fetch(tab.url)).blob();
+    if (blob.size > 10 * 1024 * 1024) throw err("too_large", "The PDF is over 10 MB.");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return { pdf_base64: btoa(bin), size: blob.size, url: tab.url };
   }
 
   if (action === "screenshot") {

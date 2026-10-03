@@ -53,6 +53,17 @@ class PageElement(BaseModel):
     in_view: bool = True
 
 
+class PdfDocument(BaseModel):
+    """The PDF a tab shows (Chrome's viewer is invisible to page snapshots), read in full."""
+    title: str = ""
+    pages: int = 0
+    text: str = ""  # every page, with [Page n of N] markers; secrets masked
+    truncated: bool = False
+    scanned: bool = False  # no text layer: `images` holds rendered pages instead
+    images: list[str] = Field(default_factory=list, exclude=True)  # base64 JPEG; never sent to the dashboard
+    error: Optional[str] = None
+
+
 class PageState(BaseModel):
     doc_id: str  # changes on every new document, so ids from an old page are rejected
     tab_id: Optional[int] = None
@@ -62,6 +73,8 @@ class PageState(BaseModel):
     elements: list[PageElement] = Field(default_factory=list)
     dialog_open: bool = False
     busy: bool = False  # still loading (document not complete, or aria-busy)
+    content_type: Optional[str] = None  # "application/pdf" for Chrome's PDF viewer
+    document: Optional[PdfDocument] = None  # set by the server when the tab is a PDF
     truncated: bool = False
     at_top: bool = True
     at_bottom: bool = True

@@ -196,7 +196,7 @@ class ScriptedModel:
         self.prompts.append(text)
         if self.gate is not None:
             await self.gate.wait()
-        page = text.split("CURRENT PAGE:", 1)[1]
+        page = text.split("CURRENT PAGE:", 1)[1].split("END OF PAGE", 1)[0]
         convo = text.split("Conversation so far (most recent last):", 1)[1].split("Steps you have taken", 1)[0]
         ids = _ids(page)
         nudged = "must be confirmed with the caller" in text

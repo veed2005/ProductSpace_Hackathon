@@ -273,3 +273,26 @@ Format: decision, alternatives considered, why.
 
 **Browser tables (pairing, installations, tasks, actions) have no foreign keys to Profile.**
 - Why: same reason as PinGuard: existing databases pick up new tables without a reset, and "forget me" deletes these rows itself.
+
+**PDFs are read whole: the extension downloads the file from the tab and the server extracts every page.**
+- Alternatives: read Chrome's PDF viewer like a page (it's opaque to snapshots); screenshots of the visible page; have the server fetch the URL.
+- Why: in a live call the agent saw nothing of a lease and couldn't answer. Fetching from the page itself carries the person's session (PDFs behind a login work) without the server ever seeing cookies, and text extraction gives every page, not just the visible one. Scanned PDFs (no text layer) fall back to pictures of their first 8 pages. The document goes first in the prompt so follow-up questions reuse the provider's prompt cache (answers took about 1 s).
+
+**A new decision kind, `answer`, for questions about the page or document, with quoted evidence.**
+- Alternatives: reuse `done` (ends the task); answer without evidence.
+- Why: questions come in a series ("can I have a dog?", "how do I get out early?"), so the conversation must stay open. Requiring a quote that code finds in the page keeps answers grounded in the person's own document. A summary may stitch several quotes; every piece of 3+ words must be real.
+
+**The agent can no longer type web addresses (`navigate` removed from its vocabulary).**
+- Why: in a live call, "look up a movie" jumped straight to the previous request's film by URL: nothing visible happened and nothing was searched. Using the site's own search and links is what the person expects to see. Requests for the person's own things (appointments, loans, orders) go to the account area instead of search, which kept the library flow at 4 steps.
+
+**A new request starts with a note not to reuse details from earlier requests.**
+- Why: the conversation is kept for context ("that one", "the other time"), but a vague new request ("look up a movie") must be clarified, not filled in from an old one.
+
+**Evidence is checked against exactly the text the model was shown.**
+- Why: the model quoted the page title as it appears in the snapshot ("Title: …", with an invisible direction mark) and was rejected three times on a page that did prove success.
+
+**Icon-only buttons get a guessed name from class names, ids and icon references, marked "(icon)".**
+- Why: a magnifying-glass button with no text or label was invisible to the model, so it couldn't open a hidden search box.
+
+**Site names skip bot-check titles and prefer the part of the title that matches the address.**
+- Why: a Cloudflare check made the greeting say "I can see you have Just a moment... open".
