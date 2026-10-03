@@ -194,3 +194,66 @@ def test_speech_seconds_scales_and_caps():
     assert voice.speech_seconds("") == 1.0
     assert 3 < voice.speech_seconds(" ".join(["word"] * 10)) < 6
     assert voice.speech_seconds(" ".join(["word"] * 1000)) == 15.0
+
+
+# ---------------------------------------------------------------- demo hardening (B6)
+
+def test_slow_brain_says_one_moment_first(client, monkeypatch):
+    import time as _time
+
+    def slow(req):
+        _time.sleep(0.3 if req.text else 0)
+        return TurnResult(reply=f"answer to {req.text}")
+
+    monkeypatch.setattr(voice, "handle_turn", slow)
+    monkeypatch.setattr(voice, "FILLER_AFTER_S", 0.05)
+    with client.websocket_connect("/twilio/voice/relay") as ws:
+        ws.send_json(setup_msg())
+        ws.receive_json()
+        ws.send_json({"type": "prompt", "voicePrompt": "hello", "last": True})
+        assert ws.receive_json()["token"] == voice.FILLER["en"]
+        assert ws.receive_json()["token"] == "answer to hello"
+
+
+def test_brain_that_never_answers_gets_an_apology(client, monkeypatch):
+    import time as _time
+
+    monkeypatch.setattr(voice, "handle_turn", lambda req: _time.sleep(0.5) or TurnResult(reply="too late"))
+    monkeypatch.setattr(voice, "FILLER_AFTER_S", 0.05)
+    monkeypatch.setattr(voice, "TURN_TIMEOUT_S", 0.15)
+    with client.websocket_connect("/twilio/voice/relay") as ws:
+        ws.send_json(setup_msg())
+        assert ws.receive_json()["token"] == voice.FILLER["en"]
+        assert ws.receive_json()["token"] == voice.SORRY["en"]
+
+
+def test_fast_brain_has_no_filler(client, brain):
+    with client.websocket_connect("/twilio/voice/relay") as ws:
+        ws.send_json(setup_msg())
+        assert ws.receive_json()["token"] == "you said (nothing)"
+
+
+def test_recording_announced_and_started_when_enabled(client, brain, monkeypatch):
+    monkeypatch.setenv("FORMLINE_RECORD_CALLS", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    started = []
+    monkeypatch.setattr(voice, "start_recording", lambda sid: started.append(sid))
+    relay = relay_element(client.post("/twilio/voice", data={"From": CALLER}).text)
+    assert relay.get("welcomeGreeting") == voice.GREETING["en"] + voice.RECORDING_NOTICE["en"]
+    with client.websocket_connect("/twilio/voice/relay") as ws:
+        ws.send_json(setup_msg())
+        ws.receive_json()
+    assert started == ["CA1"]
+
+
+def test_recording_off_by_default(client, brain, monkeypatch):
+    started = []
+    monkeypatch.setattr(voice, "start_recording", lambda sid: started.append(sid))
+    relay = relay_element(client.post("/twilio/voice", data={"From": CALLER}).text)
+    assert relay.get("welcomeGreeting") == voice.GREETING["en"]
+    with client.websocket_connect("/twilio/voice/relay") as ws:
+        ws.send_json(setup_msg())
+        ws.receive_json()
+    assert started == []

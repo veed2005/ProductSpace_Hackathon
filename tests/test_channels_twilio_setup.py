@@ -46,3 +46,12 @@ def test_ngrok_url_none_when_agent_not_running(monkeypatch):
 
     monkeypatch.setattr(twilio_setup.httpx, "get", boom)
     assert twilio_setup.ngrok_url() is None
+
+
+def test_configure_sets_fallback_url_when_given():
+    client = MagicMock()
+    client.incoming_phone_numbers.list.return_value = [SimpleNamespace(sid="PN123")]
+    twilio_setup.configure(client, "+15550000000", "https://x.ngrok-free.app", "https://handler.twilio.com/twiml/EH1")
+    kwargs = client.incoming_phone_numbers.return_value.update.call_args.kwargs
+    assert kwargs["voice_fallback_url"] == kwargs["sms_fallback_url"] == "https://handler.twilio.com/twiml/EH1"
+    assert kwargs["voice_url"] == "https://x.ngrok-free.app/twilio/voice"
