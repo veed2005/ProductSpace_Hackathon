@@ -39,7 +39,7 @@ python3 scripts/lane.py check          # files on this branch outside the user's
 
 ## Git
 
-- Never commit to `main`. It's protected; changes land only through PRs with passing CI.
+- Never commit or push to `main`. Changes land only through PRs with passing CI (the pre-push hook blocks direct pushes).
 - Branch from fresh `main` as `<lane>/<phase>-<what>` (e.g. `c/c1-pdf-verify`).
 - Keep PRs small; `uv run pytest` must pass.
 - Open the PR with `gh pr create --fill`.
