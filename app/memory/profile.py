@@ -432,6 +432,15 @@ def forget_profile(profile_id: int) -> ForgetResult:
                 (Event.profile_id == profile_id) | (Event.task_id.in_(task_ids)))).all():
             e.profile_id, e.task_id, e.phone = None, None, None
             s.add(e)
+        # Paired browsers and browser-agent history.
+        from app.models import BrowserAction, BrowserInstallation, BrowserTask
+
+        browser_tasks = [t.id for t in s.exec(select(BrowserTask).where(BrowserTask.profile_id == profile_id)).all()]
+        for row in s.exec(select(BrowserAction).where(BrowserAction.task_id.in_(browser_tasks))).all():
+            s.delete(row)
+        for model in (BrowserTask, BrowserInstallation):
+            for row in s.exec(select(model).where(model.profile_id == profile_id)).all():
+                s.delete(row)
         s.commit()
 
         # 3. Tasks, then documents (tasks reference documents), with their files.

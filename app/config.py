@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     # model if "Add a new form" is too slow for the stage demo.
     ingest_model: str = Field("", alias="FORMLINE_INGEST_MODEL")
 
+    # OpenAI is used when it's the only key set, or when FORMLINE_LLM_PROVIDER=openai.
+    openai_api_key: str = ""
+    llm_provider: str = Field("", alias="FORMLINE_LLM_PROVIDER")  # "", "anthropic", or "openai"
+    openai_fast_model: str = Field("gpt-4.1-mini", alias="FORMLINE_OPENAI_FAST_MODEL")
+    openai_strong_model: str = Field("gpt-4.1", alias="FORMLINE_OPENAI_STRONG_MODEL")
+    # Model for browser-agent decisions; empty means the provider's fast model.
+    agent_model: str = Field("", alias="FORMLINE_AGENT_MODEL")
+
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""

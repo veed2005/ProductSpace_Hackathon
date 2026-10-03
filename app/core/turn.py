@@ -279,7 +279,7 @@ def _localized_question(field, language: str, channel: str) -> str:
     }
     if field.id in spanish:
         return spanish[field.id]
-    if get_settings().anthropic_api_key:
+    if llm.available():
         try:
             return llm.text(
                 system=("Translate the form question into concise Spanish without adding facts. "

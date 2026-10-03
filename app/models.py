@@ -168,3 +168,72 @@ class Event(SQLModel, table=True):
     channel: Optional[str] = None
     data: dict = json_field()
     created_at: datetime = Field(default_factory=utcnow)
+
+
+# ---------------------------------------------------------------- browser agent ("call the internet")
+# Profile ids below have no foreign key on purpose (like PinGuard): "forget me" deletes these rows
+# by profile_id itself, and demo reset drops every table.
+
+class PairingRequest(SQLModel, table=True):
+    """A browser asking to pair with a phone number. The code goes to that phone (text or voice call)."""
+
+    id: str = Field(primary_key=True)  # random, given to the extension
+    phone: str = Field(index=True)
+    code_hash: str
+    delivery: str = "sms"  # sms | call
+    attempts: int = 0
+    expires_at: datetime
+    verified_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class BrowserInstallation(SQLModel, table=True):
+    """A paired Chrome extension. Its websocket credential is a random token; only a hash is stored."""
+
+    id: str = Field(primary_key=True)
+    profile_id: int = Field(index=True)
+    token_hash: str
+    label: Optional[str] = None  # e.g. "Chrome on Windows"
+    created_at: datetime = Field(default_factory=utcnow)
+    last_seen_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+
+
+class BrowserTask(SQLModel, table=True):
+    """One caller goal carried out in the browser ("make an appointment with Dr. Smith")."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    profile_id: int = Field(index=True)
+    installation_id: str
+    phone: str
+    channel: str = "voice"
+    goal: str
+    # active | waiting_input | waiting_confirmation | completed | stopped | failed | interrupted
+    status: str = "active"
+    pending: dict = json_field()  # server-side pending question or confirmation (see app/agent/policy.py)
+    steps: int = 0
+    model_calls: int = 0
+    site_name: Optional[str] = None
+    last_url: Optional[str] = None
+    result: Optional[str] = None  # what the agent reported, with the page evidence
+    started_at: datetime = Field(default_factory=utcnow)
+    completed_at: Optional[datetime] = None
+
+
+class BrowserAction(SQLModel, table=True):
+    """One step of a browser task, for the dashboard feed: a browser action, a question to the caller,
+    a confirmation, or a verification. Values typed into sensitive fields are never stored."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    task_id: int = Field(index=True)
+    kind: str  # click | type | select | ... | ask | confirm_request | confirmed | declined | verified | error
+    element_label: Optional[str] = None
+    value: Optional[str] = None
+    reason: Optional[str] = None
+    ok: bool = True
+    error: Optional[str] = None
+    url_before: Optional[str] = None
+    url_after: Optional[str] = None
+    page_changed: bool = False
+    latency_ms: Optional[int] = None
+    created_at: datetime = Field(default_factory=utcnow)

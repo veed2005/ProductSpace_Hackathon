@@ -131,7 +131,7 @@ def _answer_from_user(task: Task, field: FormField, raw_text: str) -> tuple[dict
             if field.required:
                 return {"value": None, "source": "unknown"}, "unknown"
             return {"value": None, "source": "skipped"}, "skipped"
-        if field.type == "money" and get_settings().anthropic_api_key:
+        if field.type == "money" and llm.available():
             try:
                 normalized = llm.structured(
                     _NormalizedMoney,

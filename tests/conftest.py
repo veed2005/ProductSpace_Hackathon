@@ -2,7 +2,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def isolated_db(tmp_path, monkeypatch):
+def isolated_db(tmp_path, monkeypatch, request):
     """Every test gets its own SQLite file."""
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'test.db'}")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
@@ -11,6 +11,10 @@ def isolated_db(tmp_path, monkeypatch):
     for var in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"):
         monkeypatch.setenv(var, "")
     monkeypatch.setenv("TWILIO_VALIDATE_SIGNATURES", "false")
+    # Never reach a real LLM either, unless the test is marked live (those use the keys in .env).
+    if request.node.get_closest_marker("live") is None:
+        for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "FORMLINE_LLM_PROVIDER"):
+            monkeypatch.setenv(var, "")
 
     from app import config, db
 
