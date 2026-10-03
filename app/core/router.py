@@ -2,11 +2,20 @@
 
 from typing import Literal
 
+from pydantic import BaseModel
+
+from app.config import get_settings
+from app.llm import client as llm
+
 Intent = Literal["fill_form", "explain_document", "status", "forget_me", "help"]
 
 
+class IntentClassification(BaseModel):
+    intent: Intent
+
+
 def classify_intent(text: str, *, has_media: bool = False) -> Intent:
-    """Keyword placeholder. TODO(Lane A): LLM classification via llm.structured()."""
+    """Prefer a structured LLM classification, but fall back to keyword matching."""
     t = text.lower()
     if has_media or any(w in t for w in ("letter", "document", "explain", "notice", "bill")):
         return "explain_document"
@@ -16,4 +25,19 @@ def classify_intent(text: str, *, has_media: bool = False) -> Intent:
         return "forget_me"
     if any(w in t for w in ("form", "apply", "application", "renew", "snap", "medicaid", "food stamps")):
         return "fill_form"
+
+    if get_settings().anthropic_api_key:
+        try:
+            result = llm.structured(
+                IntentClassification,
+                system=(
+                    "Classify the user's message into one of: fill_form, explain_document, status, "
+                    "forget_me, help. Return only the best match."
+                ),
+                messages=[{"role": "user", "content": text}],
+            )
+            if result.intent in {"fill_form", "explain_document", "status", "forget_me", "help"}:
+                return result.intent
+        except Exception:
+            pass
     return "help"
