@@ -61,6 +61,7 @@ class PageState(BaseModel):
     site_name: Optional[str] = None
     elements: list[PageElement] = Field(default_factory=list)
     dialog_open: bool = False
+    busy: bool = False  # still loading (document not complete, or aria-busy)
     truncated: bool = False
     at_top: bool = True
     at_bottom: bool = True

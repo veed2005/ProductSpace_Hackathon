@@ -16,7 +16,9 @@ model decision. "Stop" cancels the loop immediately.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import re
 import time
 from typing import Awaitable, Callable, Optional, Protocol
@@ -27,7 +29,7 @@ from app.agent import store
 from app.agent.decision import Decision, Step
 from app.agent.policy import classify_reply, is_consequential, is_stop, page_fingerprint, validate_step
 from app.agent.prompts import CONFIRM_NUDGE, system_prompt
-from app.agent.render import page_text, site_name
+from app.agent.render import looks_loading, page_text, site_name
 from app.browser.hub import BrowserConnection, BrowserGone, PageUnavailable
 from app.browser.protocol import ActionResult, PageState
 from app.browser.sanitize import mask
@@ -112,8 +114,18 @@ Decider = Callable[[str, list[dict]], Awaitable[Decision]]
 async def llm_decide(system: str, messages: list[dict]) -> Decision:
     return await asyncio.wait_for(
         run_in_threadpool(llm.structured, Decision, system=system, messages=messages, model=llm.agent_model(),
-                          max_tokens=900),
+                          max_tokens=900, temperature=0),
         DECIDE_TIMEOUT_S)
+
+
+def _trace(prompt: str, decision: Decision, ms: int) -> None:
+    """FORMLINE_AGENT_TRACE=path.jsonl records every prompt and decision, for tuning prompts and models.
+    Prompts contain page text and what the caller said: local debugging only."""
+    path = os.environ.get("FORMLINE_AGENT_TRACE")
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"ms": ms, "prompt": prompt, "decision": decision.model_dump()}) + "\n")
 
 
 def _norm(text: str) -> str:
@@ -164,9 +176,15 @@ class BrowserAgent:
         if self.busy:
             if is_stop(text):
                 await self.stop()
-            else:
+                return
+            if not self.pending:
                 self.inbox.append(text)  # the model sees it on its next look
-            return
+                return
+            # A question was just asked and the loop is wrapping up: this is the answer.
+            try:
+                await asyncio.wait_for(asyncio.shield(self._loop_task), 5)
+            except Exception:
+                pass
         self.transcript.append(("caller", text))
         if self.pending and self.pending.get("type") == "confirm":
             await self._resolve_confirmation(text)
@@ -282,7 +300,7 @@ class BrowserAgent:
         errors = 0
         narrated = False
         for _ in range(MAX_DECISIONS):
-            page = await self.browser.page_state()
+            page = await self._page()
             decision = await self._decide(page)
             kind = decision.kind
 
@@ -337,7 +355,7 @@ class BrowserAgent:
                 await self._say(decision.say)
             for i, step in enumerate(decision.steps[:3]):
                 if i:
-                    page = await self.browser.page_state()
+                    page = await self._page()
                 err = validate_step(step, page)
                 if err:
                     self.notes.append(f"Step {step.action} [{step.element_id}] was not run: {err}")
@@ -366,6 +384,27 @@ class BrowserAgent:
         self._persist(status="waiting_input")
         await self._say(self._t("trouble"))
 
+    async def _page(self, *, fresh: bool = False) -> PageState:
+        """The current page, after any loading indicator goes away (up to about 6 seconds)."""
+        page = await self.browser.page_state(fresh=fresh)
+        for _ in range(15):
+            if not looks_loading(page):
+                break
+            await asyncio.sleep(0.4)
+            page = await self.browser.page_state(fresh=True)
+        return page
+
+    @staticmethod
+    def _tidy(decision: Decision, page: PageState) -> Decision:
+        """Models sometimes mangle an id ("e27},{"). If the cleaned-up id is a real element, use it;
+        otherwise leave it for validation to reject."""
+        for step in decision.steps:
+            if step.element_id and page.control(step.element_id) is None:
+                m = re.match(r"\s*\[?([A-Za-z]{0,3}\d+)", step.element_id)
+                if m and page.control(m.group(1)):
+                    step.element_id = m.group(1)
+        return decision
+
     async def _decide(self, page: PageState) -> Decision:
         while self.inbox:
             said = self.inbox.pop(0)
@@ -381,10 +420,12 @@ class BrowserAgent:
         started = time.perf_counter()
         try:
             decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": user}])
-        except (asyncio.TimeoutError, ValueError) as e:
-            log.warning("agent decision failed once (%s); retrying", e)
+        except Exception as e:  # timeout, API error, refusal, or output cut off mid-JSON: one retry
+            log.warning("agent decision failed once (%s); retrying", str(e)[:200])
             decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": user}])
         ms = round((time.perf_counter() - started) * 1000)
+        decision = self._tidy(decision, page)
+        _trace(user, decision, ms)
         self.model_calls += 1
         self._persist(model_calls=self.model_calls)
         log_event("agent_decision", profile_id=self.profile_id, channel=self.channel, ms=ms, kind=decision.kind)
@@ -416,7 +457,7 @@ class BrowserAgent:
         evidence = _norm(decision.evidence or "")
         if len(evidence) < 6:
             return False, "done needs evidence: copy the exact text on the current page that shows success"
-        page = await self.browser.page_state(fresh=True)
+        page = await self._page(fresh=True)
         hay = _norm(" \n ".join([page.title] + [f"{e.label} {e.value or ''}" for e in page.elements]))
         if evidence not in hay:
             return False, (f"Your evidence {decision.evidence!r} is not on the current page. Only use done when "

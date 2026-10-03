@@ -57,11 +57,28 @@ def page_text(state: PageState) -> str:
     head = [f"Site: {site_name(state)}", f"Title: {state.title}", f"Address: {u.netloc}{location}"]
     if state.dialog_open:
         head.append("A dialog is open; deal with it first.")
-    if not state.at_bottom:
-        head.append("More content below (scroll down to see it).")
     if state.truncated:
-        head.append("Snapshot truncated; scroll to see more.")
+        head.append("Snapshot truncated (very long page); scroll down to see the rest.")
     return "\n".join(head + [""] + [element_line(e) for e in state.elements])
+
+
+_LOADING = re.compile(r"^(loading|please wait|cargando|espere)|^(processing|one moment|un momento)[\s.…!]*$|"
+                      r"^(\w+ing)(…|\.\.\.)$", re.IGNORECASE)
+
+
+def looks_loading(state: PageState) -> bool:
+    """Spinner text, aria-busy, or an in-progress button ("Scheduling…"): wait before deciding."""
+    if state.busy:
+        return True
+    for e in state.elements:
+        label = (e.label or "").strip()
+        if len(label) > 40:
+            continue
+        if e.role in ("alert", "text", "heading") and _LOADING.search(label):
+            return True
+        if e.role == "button" and not e.enabled and label.endswith(("…", "...")):
+            return True
+    return False
 
 
 _GENERIC_TITLES = {"home", "welcome", "dashboard", "login", "sign in", "index"}

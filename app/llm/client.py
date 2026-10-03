@@ -64,7 +64,10 @@ def strong_model() -> str:
 
 
 def agent_model() -> str:
-    return get_settings().agent_model or fast_model()
+    s = get_settings()
+    if s.agent_model:
+        return s.agent_model
+    return "gpt-5.4-mini" if provider() == "openai" else fast_model()
 
 
 def _openai_model(model: str | None) -> str:
@@ -96,11 +99,12 @@ def _openai_messages(system: str, messages: list[dict]) -> list[dict]:
     return out
 
 
-def _openai_extra(model: str) -> dict:
+def _openai_extra(model: str, temperature: float | None = None) -> dict:
     # Reasoning models spend time thinking before answering; keep it minimal for phone latency.
+    # They don't accept a temperature.
     if model.startswith(("gpt-5", "o3", "o4")):
-        return {"reasoning_effort": "low"}
-    return {}
+        return {"reasoning_effort": get_settings().openai_reasoning or "low"}
+    return {} if temperature is None else {"temperature": temperature}
 
 
 def image_block(path: str | Path) -> dict:
@@ -111,13 +115,13 @@ def image_block(path: str | Path) -> dict:
 
 
 def structured(output: type[T], *, system: str, messages: list[dict], model: str | None = None,
-               max_tokens: int = 4000) -> T:
+               max_tokens: int = 4000, temperature: float | None = None) -> T:
     """Get a validated Pydantic object back. Raises the provider's API error on failure."""
     if provider() == "openai":
         model = _openai_model(model)
         resp = get_openai_client().chat.completions.parse(
             model=model, messages=_openai_messages(system, messages), response_format=output,
-            max_completion_tokens=max_tokens, **_openai_extra(model))
+            max_completion_tokens=max_tokens, **_openai_extra(model, temperature))
         msg = resp.choices[0].message
         if msg.refusal or msg.parsed is None:
             raise ValueError(f"model returned no structured output (refusal={msg.refusal!r})")
@@ -125,6 +129,8 @@ def structured(output: type[T], *, system: str, messages: list[dict], model: str
     model = model or fast_model()
     kwargs = dict(model=model, max_tokens=max_tokens, system=system, messages=messages,
                   output_format=output)
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if model in _FALLBACK_MODELS:
         resp = get_client().beta.messages.parse(betas=[_FALLBACK_BETA], fallbacks="default", **kwargs)
     else:

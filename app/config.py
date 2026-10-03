@@ -22,8 +22,11 @@ class Settings(BaseSettings):
     llm_provider: str = Field("", alias="FORMLINE_LLM_PROVIDER")  # "", "anthropic", or "openai"
     openai_fast_model: str = Field("gpt-4.1-mini", alias="FORMLINE_OPENAI_FAST_MODEL")
     openai_strong_model: str = Field("gpt-4.1", alias="FORMLINE_OPENAI_STRONG_MODEL")
-    # Model for browser-agent decisions; empty means the provider's fast model.
+    # Model for browser-agent decisions. Empty: gpt-5.4-mini on OpenAI (most accurate at the same latency in
+    # scripts/agent_bench.py), the fast model on Anthropic.
     agent_model: str = Field("", alias="FORMLINE_AGENT_MODEL")
+    # Reasoning effort for OpenAI reasoning models (gpt-5.x, o-series): none | minimal | low | medium.
+    openai_reasoning: str = Field("low", alias="FORMLINE_OPENAI_REASONING")
 
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

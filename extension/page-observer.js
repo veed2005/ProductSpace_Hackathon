@@ -249,7 +249,7 @@
     let dialogOpen = false;
 
     // Returns {interactive, loose, blockish}: "loose" is inline text not yet attached to a block.
-    function visit(el, inDialog) {
+    function visit(el, inDialog, inLabel = false) {
       if (SKIP_TAGS.has(el.tagName.toUpperCase()) || el.hasAttribute("data-formline-ui")) return { interactive: false, loose: "" };
       if (el.hidden || el.getAttribute("aria-hidden") === "true" || el.inert) return { interactive: false, loose: "" };
       const cs = getComputedStyle(el);
@@ -268,8 +268,9 @@
         return { interactive: true, loose: "" };
       }
 
-      const block = el === document.body || BLOCK_DISPLAYS.has(cs.display) || role === "heading" || isDialog ||
-        role === "alert" || role === "status";
+      const labelOfControl = inLabel || (el.tagName === "LABEL" && !!el.control);
+      const block = !labelOfControl && (el === document.body || BLOCK_DISPLAYS.has(cs.display) || role === "heading" ||
+        isDialog || role === "alert" || role === "status");
       const slot = items.length;
       if (block) items.push(null);
       if (isDialog) {
@@ -285,13 +286,13 @@
         if (node.nodeType === Node.TEXT_NODE) {
           loose += node.nodeValue;
         } else if (node.nodeType === Node.ELEMENT_NODE) {
-          const r = visit(node, nowInDialog);
+          const r = visit(node, nowInDialog, labelOfControl);
           interactive = interactive || r.interactive;
           loose += r.blockish ? " " : r.loose;
         }
       }
 
-      if (el.tagName === "LABEL" && el.control) loose = "";  // already the control's label
+      if (labelOfControl) return { interactive, loose: "", blockish: el.tagName === "LABEL" };  // already the control's name
       if (role === "heading") {
         const level = /^H([1-6])$/.exec(el.tagName);
         items[slot] = { role: "heading", label: clean(textOf(el), MAX_TEXT), level: level ? +level[1] : (+el.getAttribute("aria-level") || 2), in_dialog: nowInDialog };
@@ -321,6 +322,7 @@
       elements: elements.slice(0, MAX_ITEMS),
       truncated: elements.length > MAX_ITEMS,
       dialog_open: dialogOpen,
+      busy: document.readyState !== "complete" || !!document.querySelector('[aria-busy="true"]'),
       at_top: se.scrollTop <= 2,
       at_bottom: se.scrollTop + innerHeight >= se.scrollHeight - 2,
     };

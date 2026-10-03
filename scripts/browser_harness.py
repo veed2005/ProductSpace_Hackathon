@@ -102,10 +102,42 @@ def pair(context, extension_id: str, server_url: str, *, phone: str, name: str, 
     code = popup.inner_text("#dev-code").strip()[-6:]
     popup.fill("#code", code)
     popup.click("#confirm")
-    popup.wait_for_selector("#profile-fields:not([hidden])")
-    popup.fill("#pname", name)
-    popup.fill("#pin", pin)
-    popup.click("#confirm")
-    popup.wait_for_selector("#paired:not([hidden])")
+    popup.wait_for_selector("#profile-fields:not([hidden]), #paired:not([hidden])")
+    if popup.is_visible("#profile-fields"):  # a new number: name and PIN
+        popup.fill("#pname", name)
+        popup.fill("#pin", pin)
+        popup.click("#confirm")
     popup.wait_for_selector(".status.connected", timeout=15000)
     popup.close()
+
+
+# ---------------------------------------------------------------- async versions (playwright.async_api)
+
+async def launch_chromium_async(playwright, *, headless: bool = True):
+    profile = tempfile.mkdtemp(prefix="formline-chrome-")
+    context = await playwright.chromium.launch_persistent_context(
+        profile, channel="chromium", headless=headless, viewport={"width": 1280, "height": 860},
+        args=[f"--disable-extensions-except={EXTENSION_DIR}", f"--load-extension={EXTENSION_DIR}"])
+    worker = context.service_workers[0] if context.service_workers else await context.wait_for_event("serviceworker")
+    return context, worker.url.split("/")[2]
+
+
+async def pair_async(context, extension_id: str, server_url: str, *, phone: str, name: str, pin: str) -> None:
+    popup = await context.new_page()
+    await popup.goto(f"chrome-extension://{extension_id}/popup/popup.html")
+    await popup.locator("details summary").click()
+    await popup.fill("#server", server_url)
+    await popup.locator("#server").dispatch_event("change")
+    await popup.fill("#phone", phone)
+    await popup.click("#send-code")
+    await popup.wait_for_selector("#dev-code:not([hidden])")
+    code = (await popup.inner_text("#dev-code")).strip()[-6:]
+    await popup.fill("#code", code)
+    await popup.click("#confirm")
+    await popup.wait_for_selector("#profile-fields:not([hidden]), #paired:not([hidden])")
+    if await popup.is_visible("#profile-fields"):  # a new number: name and PIN
+        await popup.fill("#pname", name)
+        await popup.fill("#pin", pin)
+        await popup.click("#confirm")
+    await popup.wait_for_selector(".status.connected", timeout=15000)
+    await popup.close()
