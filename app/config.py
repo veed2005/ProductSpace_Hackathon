@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
     twilio_validate_signatures: bool = True
+    # Record every call (both sides) for demo backup footage; the greeting announces it.
+    record_calls: bool = Field(False, alias="FORMLINE_RECORD_CALLS")
 
     public_base_url: str = "http://localhost:8000"
     database_url: str = f"sqlite:///{ROOT_DIR / 'data' / 'formline.db'}"

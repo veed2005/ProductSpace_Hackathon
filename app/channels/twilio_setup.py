@@ -6,6 +6,11 @@ Rerun whenever the ngrok URL changes:
   uv run python -m app.channels.twilio_setup --from-ngrok    # read the URL from the local ngrok agent
   uv run python -m app.channels.twilio_setup --url https://x.ngrok-free.app
   uv run python -m app.channels.twilio_setup --check         # show current config, change nothing
+  uv run python -m app.channels.twilio_setup --from-ngrok --fallback-url https://handler.twilio.com/twiml/EH...
+
+--fallback-url sets the number's "primary handler fails" URL for calls and texts. Point it at a
+TwiML Bin (Twilio-hosted, so it works even when this laptop or ngrok is down), e.g.:
+  <Response><Say>Sorry, Formline is offline right now. Please try again in a few minutes.</Say></Response>
 
 Also reports the number's capabilities, the account type, and (on trial accounts) which phones
 are verified, since a trial number can only text and call verified phones.
@@ -43,14 +48,18 @@ def find_number(client, phone_number: str):
     return matches[0] if matches else None
 
 
-def configure(client, phone_number: str, base_url: str):
-    """Set the number's Messaging and Voice webhooks (POST). Returns the updated number."""
+def configure(client, phone_number: str, base_url: str, fallback_url: Optional[str] = None):
+    """Set the number's Messaging and Voice webhooks (POST), and optionally the fallback URL
+    Twilio uses when those fail. Returns the updated number."""
     number = find_number(client, phone_number)
     if number is None:
         raise SystemExit(f"{phone_number} is not a number on this Twilio account (check TWILIO_PHONE_NUMBER).")
     sms_url, voice_url = webhook_urls(base_url)
-    return client.incoming_phone_numbers(number.sid).update(
-        sms_url=sms_url, sms_method="POST", voice_url=voice_url, voice_method="POST")
+    fields = dict(sms_url=sms_url, sms_method="POST", voice_url=voice_url, voice_method="POST")
+    if fallback_url:
+        fields.update(sms_fallback_url=fallback_url, sms_fallback_method="POST",
+                      voice_fallback_url=fallback_url, voice_fallback_method="POST")
+    return client.incoming_phone_numbers(number.sid).update(**fields)
 
 
 def report(client, account_sid: str, phone_number: str) -> None:
@@ -65,6 +74,7 @@ def report(client, account_sid: str, phone_number: str) -> None:
           + (f"   !! missing {', '.join(missing)}" if missing else ""))
     print(f"Messaging:  {number.sms_method} {number.sms_url or '(not set)'}")
     print(f"Voice:      {number.voice_method} {number.voice_url or '(not set)'}")
+    print(f"Fallback:   voice {number.voice_fallback_url or '(none)'}  sms {number.sms_fallback_url or '(none)'}")
     account = client.api.accounts(account_sid).fetch()
     print(f"Account:    {account.type}")
     if account.type == "Trial":
@@ -77,6 +87,7 @@ def main(argv=None) -> int:
     ap.add_argument("--url", help="public base URL (default: PUBLIC_BASE_URL)")
     ap.add_argument("--from-ngrok", action="store_true", help="use the running ngrok agent's https URL")
     ap.add_argument("--check", action="store_true", help="only print the current configuration")
+    ap.add_argument("--fallback-url", help="URL Twilio uses when the webhooks fail (e.g. a TwiML Bin)")
     args = ap.parse_args(argv)
 
     s = get_settings()
@@ -94,7 +105,7 @@ def main(argv=None) -> int:
         if not base.startswith("https://") or "example." in base:
             print(f"Refusing to use {base!r}: Twilio needs a real public https URL.")
             return 1
-        configure(client, s.twilio_phone_number, base)
+        configure(client, s.twilio_phone_number, base, args.fallback_url)
         print(f"Webhooks now point at {base}")
         if base.rstrip("/") != s.public_base_url.rstrip("/"):
             print(f"!! Set PUBLIC_BASE_URL={base.rstrip('/')} in .env and restart the server "
