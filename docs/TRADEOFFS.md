@@ -68,3 +68,10 @@ Format: decision, alternatives considered, why.
 **"Forget me" hard-deletes the person's data but keeps anonymized metrics events.**
 - Alternatives: soft delete (a `deleted_at` flag); delete metrics events too.
 - Why: a deletion the person asked for should be real, including their filled PDFs and letter photos. Metrics events keep only numbers (durations, counts) once identity is stripped, so the aggregate metrics stay honest. On a shared phone, transcript lines that were never tied to anyone are kept while another profile remains, because they may belong to that person.
+
+**Form upload runs ingestion inside the request (no job queue), with a live elapsed-time counter in the dialog.**
+- Alternatives: background job + polling.
+- Why: ingestion targets under a minute and happens a handful of times, mostly on stage. A synchronous request is one moving part instead of three. A failed ingestion removes the half-written form folder so the upload can be retried.
+
+**The form library flags problems instead of blocking: PDF fields that don't exist, unknown memory keys, broken conditions, SSN fields not marked sensitive.**
+- Why: generated schemas are drafts. The reviewer sees exactly what to fix before pressing "Mark reviewed".
