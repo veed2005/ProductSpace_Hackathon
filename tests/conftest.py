@@ -11,6 +11,10 @@ def isolated_db(tmp_path, monkeypatch, request):
     for var in ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"):
         monkeypatch.setenv(var, "")
     monkeypatch.setenv("TWILIO_VALIDATE_SIGNATURES", "false")
+    # The original form flow and fixed-language speech recognition, unless a test turns the phone-forms
+    # workflow on itself (tests/test_formcall_*.py).
+    monkeypatch.setenv("FORMLINE_PHONE_FORMS", "false")
+    monkeypatch.setenv("FORMLINE_VOICE_AUTODETECT", "false")
     # Never reach a real LLM either, unless the test is marked live (those use the keys in .env).
     if request.node.get_closest_marker("live") is None:
         for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "FORMLINE_LLM_PROVIDER"):

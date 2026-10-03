@@ -2,7 +2,7 @@
 
 **Call the internet.** Have a website open on your computer, call Formline from any phone (even a flip phone or a landline), and say what you want to do. Formline operates the site for you through a Chrome extension, asks you on the phone when the site needs something only you know, and asks permission before anything final. Start here: **[docs/CALL_THE_INTERNET.md](docs/CALL_THE_INTERNET.md)** (setup, demo, safety, tests).
 
-Callers without a paired browser still reach the original assistant below.
+Callers without a paired browser fill out forms entirely by phone, in English or Spanish, with spelling checks, verified explanations, warnings about important clauses, and an emailed receipt: **[docs/PHONE_FORMS.md](docs/PHONE_FORMS.md)**.
 
 ## The original form assistant
 

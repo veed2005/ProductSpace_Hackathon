@@ -29,6 +29,8 @@ from app.engines.form_engine import (
 )
 from app.events import log_activity, log_event, log_message, publish
 from app.config import get_settings
+from app.formcall import controller as formcall
+from app.formcall import language as formcall_language
 from app.llm import client as llm
 from app.models import Document, Form, Task
 from app.db import session_scope
@@ -42,6 +44,22 @@ CONSENT_PROMPT = "Thanks. I can help you with forms and letters. Do you agree to
 CONSENT_PROMPT_ES = "Gracias. Puedo ayudarle con formularios y cartas. ¿Acepto usar su información para ayudar a completar formularios y mantener esta conversación segura? Responda sí o no."
 PIN_SETUP = "Please choose a 4-digit PIN. I’ll ask for it before reusing saved details."
 PIN_SETUP_ES = "Elija un PIN de 4 dígitos. Se lo pediré antes de reutilizar datos guardados."
+# First contact when the caller's language is detected instead of asked (FORMLINE_PHONE_FORMS).
+WELCOME_BILINGUAL = ("Hi, this is Formline. Hola, habla Formline. How can I help you today? "
+                     "¿En qué le puedo ayudar?")
+
+
+def _phone_forms() -> bool:
+    return get_settings().phone_forms
+
+
+def _detected_language(req: TurnRequest) -> str | None:
+    """The caller's language from the recognizer's hint or the words themselves, if it's clear."""
+    hinted = formcall_language.from_hint(req.language_hint)
+    lang, sure = formcall_language.detect(req.text or "")
+    if sure:
+        return lang
+    return hinted if hinted and len((req.text or "").split()) >= 2 else None
 
 
 def handle_turn(req: TurnRequest) -> TurnResult:
@@ -79,6 +97,10 @@ def handle_turn(req: TurnRequest) -> TurnResult:
 def _sensitive_log_text(sess, text: str) -> str:
     if sess.state == "awaiting_pin_setup":  # never store a PIN in the transcript
         return "[PIN]"
+    if _phone_forms():
+        masked = formcall.transcript_text(sess, text)
+        if masked is not None:
+            return masked
     if not sess.active_task_id:
         return text
     with session_scope() as s:
@@ -94,6 +116,8 @@ def _sensitive_log_text(sess, text: str) -> str:
 
 def _brain_turn(req: TurnRequest, sess) -> TurnResult:
     profiles = identity.profiles_for_phone(req.phone)
+    if _phone_forms() and formcall.is_active(sess):
+        return formcall.handle(sess=sess, text=req.text, channel=req.channel, language_hint=req.language_hint)
     if sess.state == "awaiting_pin_setup":
         return _pin_setup_flow(req, sess)
     if sess.state == "awaiting_profile":
@@ -198,6 +222,9 @@ def _brain_turn(req: TurnRequest, sess) -> TurnResult:
             return TurnResult(reply=f"{guidance.capitalize()}. {prompt}", language=profile.preferred_language if profile else "en")
     if intent == "fill_form":
         form_id = form_library.match_form(req.text)
+        if form_id and _phone_forms():
+            return formcall.start(sess=sess, profile=profile, form_id=form_id, channel=req.channel,
+                                  language=_detected_language(req) or profile.preferred_language)
         if form_id:
             task = start_form(profile.id, form_id, phone=req.phone, channel=req.channel)
             schema = form_library.load_schema(form_id)
@@ -328,6 +355,8 @@ def _completion_result(task: Task, language: str, phone: str) -> TurnResult:
 
 def _new_phone_flow(req: TurnRequest, sess) -> TurnResult:
     text = reply_key(req.text)
+    if _phone_forms():
+        return _detect_language_flow(req, sess)
     if _language_choice(text) == "en":
         sess.pending = {"language": "en"}
         sess.state = "awaiting_consent"
@@ -345,8 +374,29 @@ def _new_phone_flow(req: TurnRequest, sess) -> TurnResult:
     return TurnResult(reply=LANGUAGE_PROMPT, language="en")
 
 
+def _detect_language_flow(req: TurnRequest, sess) -> TurnResult:
+    """New caller: no language menu. Answer in the language they speak; ask only if it isn't clear. What they
+    asked for ("Quiero solicitar beneficios de SNAP") is kept and started right after the PIN is set."""
+    text = reply_key(req.text)
+    lang = _language_choice(text) or _detected_language(req)
+    if lang is None:
+        asked = bool(sess.pending.get("asked"))
+        sess.state = "awaiting_language"
+        sess.pending = {"asked": True}
+        identity.save_session(sess)
+        reply = f"{LANGUAGE_PROMPT} {LANGUAGE_PROMPT_ES}" if asked else WELCOME_BILINGUAL
+        return TurnResult(reply=reply, language="en")
+    goal = req.text.strip() if _language_choice(text) is None and form_library.match_form(req.text, use_llm=False) else None
+    sess.pending = {"language": lang, **({"goal": goal} if goal else {})}
+    sess.state = "awaiting_consent"
+    identity.save_session(sess)
+    return TurnResult(reply=CONSENT_PROMPT_ES if lang == "es" else CONSENT_PROMPT, language=lang)
+
+
 def _language_flow(req: TurnRequest, sess) -> TurnResult:
     text = reply_key(req.text)
+    if _phone_forms():
+        return _detect_language_flow(req, sess)
     lang = _language_choice(text)
     if lang is None:
         reply = LANGUAGE_PROMPT_ES if sess.pending.get("language") == "es" else LANGUAGE_PROMPT
@@ -372,11 +422,12 @@ def _language_choice(text: str) -> str | None:
 def _consent_flow(req: TurnRequest, sess) -> TurnResult:
     text = reply_key(req.text)
     lang = sess.pending.get("language", "en")
-    if text in {"yes", "sí", "si", "y", "ok", "okay", "accept", "acepto"}:
+    if text in {"yes", "sí", "si", "y", "ok", "okay", "accept", "acepto"} or (
+            _phone_forms() and _consent_yes(req.text)):
         profile = identity.create_profile(req.phone, language=lang)
         sess.profile_id = profile.id
         sess.state = "awaiting_pin_setup"
-        sess.pending = {"language": lang}
+        sess.pending = {"language": lang, **({"goal": sess.pending["goal"]} if sess.pending.get("goal") else {})}
         identity.save_session(sess)
         return TurnResult(reply=PIN_SETUP_ES if lang == "es" else PIN_SETUP, language=lang)
     if text in {"no", "nope", "not now", "cancel", "cancelar", "n"}:
@@ -388,6 +439,12 @@ def _consent_flow(req: TurnRequest, sess) -> TurnResult:
     return TurnResult(reply=consent, language=lang)
 
 
+def _consent_yes(text: str) -> bool:
+    from app.agent.policy import classify_reply
+
+    return classify_reply(text) == "yes"
+
+
 def _pin_setup_flow(req: TurnRequest, sess) -> TurnResult:
     lang = sess.pending.get("language", "en")
     pin = re.sub(r"[\s.,-]", "", reply_key(req.text))  # "1 2 3 4." from speech -> "1234"
@@ -396,9 +453,14 @@ def _pin_setup_flow(req: TurnRequest, sess) -> TurnResult:
         return TurnResult(reply=prompt, language=lang)
     identity.set_pin(sess.profile_id, pin)
     sess.pin_verified_at = datetime.now(timezone.utc)
+    goal = sess.pending.get("goal")
     sess.state = "menu"
     sess.pending = {}
     identity.save_session(sess)
+    form_id = form_library.match_form(goal) if goal and _phone_forms() else None
+    if form_id:  # what they asked for before onboarding: start it now
+        return formcall.start(sess=sess, profile=identity.get_profile(sess.profile_id), form_id=form_id,
+                              channel=req.channel, language=lang)
     return TurnResult(reply=MENU_ES if lang == "es" else MENU, language=lang)
 
 
@@ -552,6 +614,9 @@ def _document_followup_flow(req: TurnRequest, sess) -> TurnResult:
             offer = "I set the reminder. " + offer if language == "en" else "Programé el recordatorio. " + offer
         return TurnResult(reply=offer, language=language)
 
+    if not was_reminder and yes and related_form_id and _phone_forms():
+        return formcall.start(sess=sess, profile=profile, form_id=related_form_id, channel=req.channel,
+                              language=language, from_document_id=document_id)
     if not was_reminder and yes and related_form_id:
         task = start_form(profile.id, related_form_id, phone=req.phone, channel=req.channel,
                           from_document_id=document_id)

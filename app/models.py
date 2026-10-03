@@ -123,6 +123,57 @@ class Document(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class FormRun(SQLModel, table=True):
+    """The phone form workflow for one form Task (app/formcall). A separate table so existing databases pick it
+    up without a reset; no foreign keys, and "forget me" deletes it with the task."""
+
+    task_id: int = Field(primary_key=True)
+    profile_id: int = Field(index=True)
+    # in_progress | ready_for_review | awaiting_confirmation | prepared | submitting | submitted |
+    # submission_failed | needs_attention | paused | abandoned. Only app/formcall code moves it.
+    state: str = "in_progress"
+    language: str = "en"  # the caller's language; the form's own language is the schema's
+    pending: dict = json_field()  # what the conversation is waiting on (a read-back, a spelling, a notice...)
+    stack: list = json_field(default_factory=list)  # field ids in the order they were answered (for "go back")
+    review: dict = json_field()  # final review: fingerprint, approval, what was asked and what happened
+    submission: dict = json_field()  # provider, verified reference, error
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class FormNotice(SQLModel, table=True):
+    """Important or unusual language in a form, shown to the caller with a quote checked against the PDF."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    task_id: int = Field(index=True)
+    form_id: str
+    category: str
+    severity: str  # low | medium | high
+    unusual: bool = False
+    quote: str  # exact text from the form (verified before it's stored)
+    explanation: str
+    reason: str
+    page: Optional[int] = None
+    status: str = "pending"  # pending | presented | read_exact | acknowledged | disagreed | skipped
+    presented_at: Optional[datetime] = None
+    resolved_at: Optional[datetime] = None
+
+
+class Receipt(SQLModel, table=True):
+    """An emailed record of what Formline entered. Built from task data, never from a model summary."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    task_id: int = Field(index=True)
+    profile_id: int = Field(index=True)
+    status: str = "offered"  # offered | declined | requested | generated | sent | failed
+    to_address: Optional[str] = None
+    provider: Optional[str] = None
+    provider_ref: Optional[str] = None  # message id, or the outbox file
+    error: Optional[str] = None
+    pdf_path: Optional[str] = None
+    created_at: datetime = Field(default_factory=utcnow)
+    sent_at: Optional[datetime] = None
+
+
 class PinGuard(SQLModel, table=True):
     """Wrong-PIN attempts per profile (Lane B). A separate table, so existing databases pick it up
     without a reset. No foreign key on purpose: it holds only counts, and profile deletion

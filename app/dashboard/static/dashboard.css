@@ -348,3 +348,20 @@ button.btn { cursor: pointer; }
   .topbar { flex-wrap: wrap; gap: 10px; }
   .q-table .hide-sm { display: none; }
 }
+
+/* Phone form session (app/formcall) */
+.phone-session { margin: 12px 0; padding: 12px; border: 1px solid var(--line, #ddd); border-radius: 10px; }
+.ps-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 4px 0; }
+.ps-unresolved { margin: 6px 0; color: #9a4b00; }
+.notices { list-style: none; padding: 0; margin: 6px 0; }
+.notice { padding: 8px 0; border-top: 1px solid var(--line, #eee); }
+.notice .quote { color: #555; font-style: italic; margin-top: 2px; }
+.notice-status { color: #666; }
+.chip.sev-high { background: #fde2e1; color: #8a1c14; }
+.chip.sev-medium { background: #fff1d6; color: #7a4a00; }
+.chip.sev-low { background: #eef0f3; color: #444; }
+.field .audit { grid-column: 1 / -1; font-size: 0.8em; color: #666; display: flex; flex-wrap: wrap; gap: 8px; }
+.chip.ver-confirmed { background: #dff3e4; color: #1d5e2e; }
+.chip.ver-inferred { background: #eef0f3; color: #444; }
+.chip.ver-unverified, .chip.ver-read_back { background: #fff1d6; color: #7a4a00; }
+.chip.prov { background: #e8eefc; color: #23408e; }

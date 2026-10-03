@@ -25,6 +25,8 @@ class TurnRequest(BaseModel):
     channel: Channel
     text: str = ""
     media_paths: list[str] = Field(default_factory=list)  # local files, already downloaded
+    # Language the speech recognizer detected for this utterance (BCP-47, e.g. "es-US"), if any.
+    language_hint: Optional[str] = None
 
 
 class TurnResult(BaseModel):
@@ -61,6 +63,11 @@ class FormField(BaseModel):
     sensitive: bool = False  # never echo over SMS; mask in receipts
     group: Optional[str] = None  # e.g. "Household", "Income" (for batching and read-back)
     max_length: Optional[int] = None  # chars that fit in the PDF box, if known
+    # Exactness matters (names, addresses, ids): spoken answers are read back or spelled before they
+    # count as verified. None = decided from the field's type and label (app/formcall/verify.py).
+    exact: Optional[bool] = None
+    # For money fields: the period the form asks for. None = inferred from the question ("each month").
+    period: Optional[Literal["month", "week", "paycheck", "year"]] = None
 
 
 class FormSchema(BaseModel):
