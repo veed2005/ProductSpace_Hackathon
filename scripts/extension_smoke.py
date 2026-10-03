@@ -92,6 +92,9 @@ def main() -> int:
             r = server.command("type", element_id=pw_field["id"], doc_id=s["doc_id"], value="x")
             assert not r["success"] and r["error"] == "blocked", r
             print("privacy: password/hidden/card/SSN values withheld; typing into password refused")
+            shot = server.command("screenshot")
+            assert shot["ok"] and shot["jpeg_base64_chars"] > 1000, shot
+            print(f"screenshot (opt-in vision fallback): {shot['jpeg_base64_chars']} base64 chars")
             print("\nEXTENSION SMOKE TEST PASSED")
             return 0
         except Exception:

@@ -124,6 +124,12 @@ class BrowserConnection:
         return ActionResult(success=False, action=action, error=msg.get("error") or "failed",
                             detail=msg.get("detail"))
 
+    async def screenshot(self, tab_id: Optional[int] = None) -> Optional[str]:
+        """Base64 JPEG of the visible tab, or None. Used only by the opt-in vision fallback."""
+        msg = await self.request("screenshot", tab_id=tab_id, timeout=8)
+        image = (msg.get("data") or {}).get("image") if msg.get("ok") else None
+        return image.split(",", 1)[1] if image and "," in image else None
+
     def public_tab(self) -> dict:
         return {"tab_id": self.tab.get("tab_id"), "url": self.tab.get("url"), "title": self.tab.get("title")}
 

@@ -1,5 +1,11 @@
 # Formline
 
+**Call the internet.** Have a website open on your computer, call Formline from any phone (even a flip phone or a landline), and say what you want to do. Formline operates the site for you through a Chrome extension, asks you on the phone when the site needs something only you know, and asks permission before anything final. Start here: **[docs/CALL_THE_INTERNET.md](docs/CALL_THE_INTERNET.md)** (setup, demo, safety, tests).
+
+Callers without a paired browser still reach the original assistant below.
+
+## The original form assistant
+
 **Any form, any phone.** Call or text one number to fill out government and public-service forms, or text a photo of a letter to get it explained in plain language, in your language. Works from a flip phone.
 
 A live web dashboard shows forms filling in, documents being explained, and memory being reused in real time.
@@ -34,7 +40,8 @@ Run tests:
 
 ```bash
 uv run pytest            # offline tests (LLM mocked)
-uv run pytest -m live    # tests that hit the real Anthropic API
+uv run pytest -m live    # tests that hit the real LLM API
+uv run python scripts/e2e_golden_path.py   # browser agent end to end: Chromium + extension + simulated call
 ```
 
 ## Twilio + ngrok setup

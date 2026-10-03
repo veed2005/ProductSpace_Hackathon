@@ -310,3 +310,39 @@ def test_confirm_with_several_steps_runs_the_lead_and_confirms_the_last():
     agent, portal = run(scenario())
     assert portal.slot == "thu"  # the harmless lead step ran
     assert agent.pending["step"] == {"action": "click", "element_id": "next", "value": None}  # only the last waits
+
+
+def test_vision_fallback_is_opt_in_and_only_for_sparse_pages(monkeypatch):
+    from app.browser.protocol import PageElement, PageState
+    from app.config import get_settings
+
+    sparse = PageState(doc_id="d1", url="https://app.test/", title="Canvas app",
+                       elements=[PageElement(id="e1", role="button", label="")])
+
+    class Shooter(FakeBrowser):
+        async def page_state(self, *, fresh=False):
+            return sparse
+
+        async def screenshot(self):
+            return "aGVsbG8="
+
+    def model_seeing(messages_box):
+        async def model(system, messages):
+            messages_box.append(messages[-1]["content"])
+            return Decision(kind="blocked", steps=[], say="I can't tell what's on this page.", reason="sparse",
+                            evidence=None)
+        return model
+
+    async def scenario():
+        seen = []
+        agent = BrowserAgent(browser=Shooter(), say=lambda t: asyncio.sleep(0), profile_id=0, installation_id="x",
+                             phone="+15550001111", decide=model_seeing(seen))
+        await agent.handle("Click the blue thing")
+        await settle(agent)
+        return seen
+
+    assert all(isinstance(c, str) for c in run(scenario()))  # off by default: text only
+    monkeypatch.setenv("FORMLINE_VISION_FALLBACK", "true")
+    get_settings.cache_clear()
+    content = run(scenario())[0]
+    assert content[0]["type"] == "image" and content[0]["source"]["data"] == "aGVsbG8="

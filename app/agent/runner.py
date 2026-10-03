@@ -33,6 +33,7 @@ from app.agent.render import looks_loading, page_text, site_name
 from app.browser.hub import BrowserConnection, BrowserGone, PageUnavailable
 from app.browser.protocol import ActionResult, PageState
 from app.browser.sanitize import mask
+from app.config import get_settings
 from app.events import log_event
 from app.llm import client as llm
 
@@ -106,6 +107,12 @@ class ConnectionPort:
             await self.conn.request("overlay", tab_id=self.tab_id, timeout=3, text=text)
         except Exception:
             pass  # cosmetic
+
+    async def screenshot(self) -> Optional[str]:
+        try:
+            return await self.conn.screenshot(self.tab_id)
+        except Exception:
+            return None
 
 
 Decider = Callable[[str, list[dict]], Awaitable[Decision]]
@@ -433,12 +440,19 @@ class BrowserAgent:
         user = (f"Caller's goal: {self.goal}\n\nConversation so far (most recent last):\n{convo}\n\n"
                 f"Steps you have taken in the browser:\n{steps}\n\nNotes for this turn:\n{notes}\n\n"
                 f"CURRENT PAGE:\n{page_text(page)}")
+        content: object = user
+        image = await self._vision_fallback(page)
+        if image:
+            content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image}},
+                       {"type": "text", "text": user + "\n\nA screenshot of the visible page is attached because the "
+                        "snapshot has little text. Use it to understand the page; you can still only act on ids in "
+                        "the snapshot."}]
         started = time.perf_counter()
         try:
-            decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": user}])
+            decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": content}])
         except Exception as e:  # timeout, API error, refusal, or output cut off mid-JSON: one retry
             log.warning("agent decision failed once (%s); retrying", str(e)[:200])
-            decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": user}])
+            decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": content}])
         ms = round((time.perf_counter() - started) * 1000)
         decision = self._tidy(decision, page)
         _trace(user, decision, ms)
@@ -448,6 +462,15 @@ class BrowserAgent:
         log.info("agent %s in %sms: %s | %s", decision.kind, ms,
                  [(s.action, s.element_id, s.value) for s in decision.steps], decision.reason)
         return decision
+
+    async def _vision_fallback(self, page: PageState) -> Optional[str]:
+        """A screenshot, only if FORMLINE_VISION_FALLBACK is on and the snapshot is nearly empty."""
+        if not get_settings().vision_fallback or not hasattr(self.browser, "screenshot"):
+            return None
+        meaningful = [e for e in page.elements if (e.label or "").strip()]
+        if len(meaningful) >= 4:
+            return None
+        return await self.browser.screenshot()
 
     async def _execute(self, step: Step, page: PageState, reason: str) -> ActionResult:
         el = page.control(step.element_id)

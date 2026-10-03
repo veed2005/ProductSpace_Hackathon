@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Call Formline from any phone and it operates this browser for you. Pair once with your phone number.",
   "permissions": ["storage", "tabs", "scripting", "alarms"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"

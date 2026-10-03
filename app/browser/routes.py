@@ -168,6 +168,9 @@ async def dev_command(body: DevCommand, request: Request) -> dict:
             return (await conn.page_state(body.tab_id, fresh=True)).model_dump()
         except PageUnavailable as e:
             raise HTTPException(409, {"code": e.code, "detail": e.detail})
+    if body.action == "screenshot":
+        image = await conn.screenshot(body.tab_id)
+        return {"ok": bool(image), "jpeg_base64_chars": len(image or "")}
     result = await conn.act(body.action, tab_id=body.tab_id, doc_id=body.doc_id, element_id=body.element_id,
                             value=body.value)
     return result.model_dump()

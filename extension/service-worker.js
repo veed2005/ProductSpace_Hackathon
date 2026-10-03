@@ -206,6 +206,13 @@ async function run(action, args, tabId) {
     return { ...res.data, tab_id: tab.id };
   }
 
+  if (action === "screenshot") {
+    // Only for the vision fallback (off by default on the server). Captures what is visible in the tab.
+    if (!tab.active) throw err("unsupported_page", "That tab isn't the visible one.");
+    const image = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 60 });
+    return { image };
+  }
+
   if (action === "overlay") {
     await sendToTab(tab.id, { kind: "formline", action, args }).catch(() => {});
     return {};

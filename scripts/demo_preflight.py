@@ -31,7 +31,8 @@ class Check:
 
 def check_env() -> list[Check]:
     s = get_settings()
-    out = [Check("Anthropic API key in .env", bool(s.anthropic_api_key), fix="Set ANTHROPIC_API_KEY in .env")]
+    out = [Check("LLM API key in .env (Anthropic or OpenAI)", bool(s.anthropic_api_key or s.openai_api_key),
+                 fix="Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env")]
     twilio = bool(s.twilio_account_sid and s.twilio_auth_token and s.twilio_phone_number)
     out.append(Check("Twilio credentials in .env", twilio, fix="Set TWILIO_ACCOUNT_SID / _AUTH_TOKEN / _PHONE_NUMBER (ask Lane B)"))
     out.append(Check("PUBLIC_BASE_URL is an https ngrok URL",
@@ -145,6 +146,8 @@ def run(local_only: bool) -> list[Check]:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # ✅/❌ on Windows consoles
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--local", action="store_true", help="skip Twilio and ngrok checks")
     checks = run(ap.parse_args().local)

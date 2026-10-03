@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     agent_model: str = Field("", alias="FORMLINE_AGENT_MODEL")
     # Reasoning effort for OpenAI reasoning models (gpt-5.x, o-series): none | minimal | low | medium.
     openai_reasoning: str = Field("low", alias="FORMLINE_OPENAI_REASONING")
+    # Send a screenshot to the model when a page's text snapshot is nearly empty (canvas apps, image-only
+    # pages). Off by default: a screenshot skips the in-browser redaction of secrets.
+    vision_fallback: bool = Field(False, alias="FORMLINE_VISION_FALLBACK")
 
     twilio_account_sid: str = ""
     twilio_auth_token: str = ""

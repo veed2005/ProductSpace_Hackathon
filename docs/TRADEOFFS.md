@@ -230,3 +230,46 @@ Format: decision, alternatives considered, why.
 
 **When the laptop or ngrok is down, Twilio's fallback URL points at a Twilio-hosted TwiML Bin.**
 - Why: our own fallback (`/twilio/voice/status`) can't help if our server is unreachable. A TwiML Bin lives on Twilio, so callers still hear "Formline is offline, try again in a few minutes" instead of Twilio's generic error.
+
+## Pivot: call the internet
+
+**Formline operates the person's own browser through a Chrome extension, instead of filling a fixed set of PDFs.**
+- Alternatives: keep the form-schema product; a server-side headless browser that logs in for the person.
+- Why: the extension acts in the browser where the person is already signed in, so Formline never sees passwords or cookies, works on any site, and the person watches it happen. The form/PDF assistant stays as-is for callers without a paired browser.
+
+**The model sees a semantic text snapshot of the page, not screenshots or HTML.**
+- Alternatives: screenshots + vision (click by coordinates); raw HTML.
+- Why: a snapshot of controls with accessible names is small (fast and cheap per decision), works with any language model, and lets the extension redact secrets before anything leaves the browser. Screenshots can't be redacted, so they're an opt-in fallback for nearly empty pages only (`FORMLINE_VISION_FALLBACK`).
+
+**Actions name temporary element ids from the snapshot; the model never writes JavaScript or selectors.**
+- Why: a fixed vocabulary (click, type, select, check, …) is checkable. Ids carry a per-document `doc_id`, so an id from a previous page is refused rather than hitting a different element that happens to share it.
+
+**Consequential steps are gated three ways: the model's `confirm`, a deterministic backstop, and a server-stored pending action with a page fingerprint.**
+- Alternatives: trust the model to ask; a fixed list of selectors per site.
+- Why: models forget to ask. The backstop catches final verbs (book, send, pay, delete, cancel <thing>) and any button on a review page, while letting "Schedule an appointment" (which starts a flow) through. The fingerprint covers page text too, so a "yes" given to one summary can't book a different one; a site with live-updating text just gets asked again.
+
+**Success is only reported with quoted evidence found on a fresh snapshot, and only after a confirmed final step actually ran.**
+- Why: "the model asked to click Book" is not "the appointment is booked". Matching ignores case, punctuation, and snapshot markup, so a quote spanning a heading and the line below it counts.
+
+**The agent loop runs in the background of the call, with an inbox for speech that arrives mid-task.**
+- Why: "stop" must work while the agent is mid-step. A reply to a question the agent just asked is treated as the answer, not as mid-task chatter.
+
+**Agent model: gpt-5.4-mini (low reasoning) when using OpenAI.**
+- Alternatives: gpt-4.1-mini, gpt-4.1, gpt-5-mini.
+- Why: measured on the recorded prompts that failed (scripts/agent_bench.py): gpt-5.4-mini chose correctly every time at ~0.8–1 s; gpt-4.1-mini asked ahead and mangled ids, gpt-4.1 used the wrong action for a radio button, gpt-5-mini was 2–7 s. OpenAI support was added to `llm.client` because this machine had only an OpenAI key; the provider is picked by which key is set, so Anthropic users see no change.
+
+**Pairing proves the phone with a code sent by text or by voice call, then issues a random browser token (stored hashed). The PIN is still required on each call.**
+- Why: landlines can't receive texts but can answer a call. Caller ID only identifies the browser; it can be spoofed, so the PIN authorizes control (reusing the existing 30-minute verification and 3-strike lockout).
+
+**The agent waits out loading indicators before deciding.**
+- Why: in the first live run the model saw a "Loading…" placeholder and gave up. Waiting on `aria-busy`, loading text, and disabled "…ing…" buttons (up to ~6 s) is generic and fixed it.
+
+**Texts from a paired phone drive the browser too, with replies sent as separate texts.**
+- Why: deaf and hard-of-hearing callers, and the demo's text-only backup. Browser work can outlast Twilio's webhook timeout, so replies go out by REST, not in the webhook response.
+
+**End-to-end tests drive Playwright's Chromium with a model playing the caller.**
+- Alternatives: keyword-matched caller replies; Chrome stable.
+- Why: Chrome 137+ ignores `--load-extension`, so automated runs use Chromium. Keyword replies broke whenever the agent phrased a question differently; a persona-driven caller answers like a person would, and the run passes only if the site's own state shows the goal was done.
+
+**Browser tables (pairing, installations, tasks, actions) have no foreign keys to Profile.**
+- Why: same reason as PinGuard: existing databases pick up new tables without a reset, and "forget me" deletes these rows itself.

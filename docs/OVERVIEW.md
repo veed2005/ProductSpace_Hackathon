@@ -1,5 +1,7 @@
 # Formline: full project overview (as of 2026-10-03)
 
+> **Superseded in part.** This describes the repo before the "call the internet" pivot. For the browser agent, see [CALL_THE_INTERNET.md](CALL_THE_INTERNET.md). The `Deadline.date` bug in section 10 is fixed.
+
 This document describes the Formline repository in enough detail that someone who hasn't seen the code can write precise instructions for a coding agent (Claude Code) working in it. It covers what the product is meant to be, how the code is organized, what each part does today, what's broken, and the rules the agent works under.
 
 ---
