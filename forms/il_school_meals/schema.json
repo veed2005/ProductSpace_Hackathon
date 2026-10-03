@@ -24,7 +24,7 @@
       "id": "snap_case_number",
       "label": "SNAP or TANF case number",
       "required": true,
-      "question_hint": "What is your SNAP or TANF case number? It's on your benefits letter.",
+      "question_hint": "What is your SNAP or TANF case number? It is on your benefits letter, up to 9 letters or numbers.",
       "pdf_field": "Case Number Row1",
       "profile_key": "case_numbers.snap",
       "condition": {
@@ -32,7 +32,8 @@
         "equals": "yes"
       },
       "group": "Household",
-      "max_length": 9
+      "max_length": 9,
+      "validation": "^[A-Za-z0-9-]{1,9}$"
     },
     {
       "id": "child_name",

@@ -69,6 +69,11 @@ Format: decision, alternatives considered, why.
 - Alternatives: soft delete (a `deleted_at` flag); delete metrics events too.
 - Why: a deletion the person asked for should be real, including their filled PDFs and letter photos. Metrics events keep only numbers (durations, counts) once identity is stripped, so the aggregate metrics stay honest. On a shared phone, transcript lines that were never tied to anyone are kept while another profile remains, because they may belong to that person.
 
+## Lane B
+
+**Twilio webhooks are set by a script (`python -m app.channels.twilio_setup`), not by hand in the console.**
+- Alternatives: click through the console every time; a reserved ngrok domain only.
+- Why: a free ngrok URL changes on every restart, and a stale webhook silently breaks the demo. The script can read the live URL from the local ngrok agent, repoints both webhooks in one step, and reports missing capabilities and (on trial accounts) unverified phones.
 **Form upload runs ingestion inside the request (no job queue), with a live elapsed-time counter in the dialog.**
 - Alternatives: background job + polling.
 - Why: ingestion targets under a minute and happens a handful of times, mostly on stage. A synchronous request is one moving part instead of three. A failed ingestion removes the half-written form folder so the upload can be retried.
@@ -171,3 +176,15 @@ Format: decision, alternatives considered, why.
 
 **Tests run with Twilio credentials blanked and signature validation off (`tests/conftest.py`).**
 - Why: real credentials in a developer's `.env` must never make a test send a real text, and other lanes' tests post unsigned webhooks. `tests/test_channels_messaging.py` turns validation back on to test it.
+**Demo rehearsal fills all three forms for the seeded persona, from memory, in the test suite.**
+- Why: it's the on-stage path end to end (Lane D's seed -> memory -> schema `profile_key` -> PDF -> verify) and it caught a real bug: the seeded SNAP case number `IL-SNAP-448120` is 14 characters, but the school meals box holds 9, so it would print cut off. The seed now uses `448120917`, and the schema validates the case number (up to 9 letters or digits) so a longer one is re-asked. `FORMLINE_KEEP_DEMO_PDFS=1` keeps the filled PDFs in `data/demo/filled/` for eyeballing.
+
+**`app/pdf/format.py`: `pdf_value(field, answer)` turns stored values into what paper forms expect.**
+- Why: memory stores ISO dates and E.164 phones, so the Medicaid PDF showed `+12025550101` and dates as `1988-03-14`. US forms want `(202) 555-0101` and `03/14/1988`, money without "$", and the form's own checkbox states. Lane A's completion step can call it per field.
+
+**Option labels are read from whichever side the form prints them.**
+- Why: the SNAP and Medicaid forms print "[ ] Yes [ ] No"; the SNAP renewal prints "Yes [ ] No [ ]". Reading only the word right of a button mapped the second layout backwards. If the word just left of a group's leftmost button is Yes/No/Sí, labels are on the left.
+
+**The finale form is the 3-page IDHS SNAP Redetermination (IL444-1893), kept in `forms/_new_form_demo/` without a meta.json.**
+- Alternatives: a county LIHEAP application (12 pages, a scanned page with boxes laid over it).
+- Why: it's clean, short (about a 3k-token prompt), Illinois, and overlaps the SNAP application, so the newly added form fills mostly from memory on stage. Without meta.json the library ignores it until it's uploaded.

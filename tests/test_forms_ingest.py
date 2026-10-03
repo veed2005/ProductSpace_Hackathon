@@ -288,6 +288,37 @@ def test_cli_dry_run_needs_no_api(form_pdf):
     assert "5 fillable fields" in out and "F1 | text | p1 | Full name:" in out
 
 
+def test_labels_printed_before_their_buttons(tmp_path):
+    """'Yes [ ] No [ ]': the word right of the first button is "No", but that button means Yes."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 62), "Does anyone get paid for working?  Yes", fontsize=10)
+    page.insert_text((262, 62), "No", fontsize=10)
+    for x in (240, 280):
+        w = fitz.Widget()
+        w.field_name, w.field_type, w.rect = "paid", fitz.PDF_WIDGET_TYPE_RADIOBUTTON, fitz.Rect(x, 52, x + 10, 62)
+        w.field_value = False
+        page.add_widget(w)
+    xrefs = [w.xref for w in page.widgets()]
+    _rename_on_state(doc, xrefs[0], "0")
+    _rename_on_state(doc, xrefs[1], "1")
+    path = tmp_path / "left.pdf"
+    doc.save(path)
+    prep = ingest.prepare(path)
+    pf = prep.fields[0]
+    assert "states: 0='Yes', 1='No'" in prep.field_lines[0]
+    d = DraftField(id="paid", label="Paid", type="yes_no", question_hint="?", pdf_field="paid")
+    assert ingest._yes_no_values(pf, d, prep.button_labels) == {"yes": "0", "no": "1"}
+
+
+def test_finale_form_is_ready_to_upload():
+    pdf = ROOT / "forms" / "_new_form_demo" / "IL444-1893_snap_renewal.pdf"
+    prep = ingest.prepare(pdf)
+    assert len(prep.fields) > 50 and prep.chars < 20_000
+    assert "_new_form_demo" not in [m.form_id for m in form_library.list_forms()]
+    assert any("Does anyone get paid for working? Yes | states: 0='Yes', 1='No'" in line for line in prep.field_lines)
+
+
 def test_cli_help():
     out = subprocess.run([sys.executable, str(ROOT / "scripts" / "ingest_form.py"), "--help"],
                          capture_output=True, text=True, check=True).stdout
