@@ -129,8 +129,10 @@ def _trace(prompt: str, decision: Decision, ms: int) -> None:
 
 
 def _norm(text: str) -> str:
-    text = (text or "").replace("’", "'").replace("“", '"').replace("”", '"').casefold()
-    return " ".join(re.sub(r"[^\w\s'$#:.-]", " ", text).split()).strip(" .")
+    """For matching quoted evidence against page text: case, punctuation and spacing don't matter, so a
+    quote that spans a heading and the line under it still matches."""
+    text = (text or "").replace("’", "'").casefold()
+    return " ".join(re.sub(r"[^\w$#']+", " ", text).split())
 
 
 class BrowserAgent:
@@ -458,7 +460,7 @@ class BrowserAgent:
         if len(evidence) < 6:
             return False, "done needs evidence: copy the exact text on the current page that shows success"
         page = await self._page(fresh=True)
-        hay = _norm(" \n ".join([page.title] + [f"{e.label} {e.value or ''}" for e in page.elements]))
+        hay = _norm(" ".join([page.title] + [f"{e.label} {e.value or ''}" for e in page.elements]))
         if evidence not in hay:
             return False, (f"Your evidence {decision.evidence!r} is not on the current page. Only use done when "
                            "the page itself shows the goal was achieved, and quote it exactly.")

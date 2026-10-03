@@ -70,7 +70,7 @@ def keyword_reply(line: str) -> str:
     return "Yes."
 
 
-async def one_run(pw, server: Server, headed: bool, run: int) -> dict:
+async def one_run(pw, server: Server, headed: bool, run: int, args_screens: str = "") -> dict:
     context, ext = await launch_chromium_async(pw, headless=not headed)
     try:
         await pair_async(context, ext, server.url, phone=PHONE.format(run), name="Margaret", pin=PIN)
@@ -128,6 +128,14 @@ async def one_run(pw, server: Server, headed: bool, run: int) -> dict:
 
         await asyncio.sleep(0.5)
         body = await page.inner_text("main")
+        if args_screens:
+            await page.screenshot(path=str(Path(args_screens) / f"run{run}-portal.png"))
+            dash = await context.new_page()
+            await dash.set_viewport_size({"width": 1600, "height": 950})
+            await dash.goto(server.url + "/dashboard")
+            await asyncio.sleep(2.5)
+            await dash.screenshot(path=str(Path(args_screens) / f"run{run}-dashboard.png"))
+            await dash.close()
         appts = json.loads(await page.evaluate("localStorage.getItem('rb_appointments') || '[]'"))
         booked = [a for a in appts if a.get("provider") == "smith"]
         db = sqlite3.connect(server.data_dir / "formline.db")
@@ -164,7 +172,7 @@ async def main_async(args) -> int:
             for run in range(1, args.runs + 1):
                 print(f"\n=== run {run} ===")
                 try:
-                    r = await one_run(pw, server, args.headed, run)
+                    r = await one_run(pw, server, args.headed, run, args.screenshots)
                 except Exception as e:
                     failures += 1
                     print(f"RUN {run} CRASHED: {e!r}\n--- server log ---\n{server.tail(60)}")
@@ -187,6 +195,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--headed", action="store_true")
     p.add_argument("--runs", type=int, default=1)
+    p.add_argument("--screenshots", default="", help="folder to save the portal and dashboard screenshots in")
     p.add_argument("--verbose", action="store_true", help="print the action list and agent log for every run")
     return asyncio.run(main_async(p.parse_args()))
 

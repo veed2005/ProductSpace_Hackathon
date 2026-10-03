@@ -271,3 +271,12 @@ def test_affirmative_replies_book(reply):
         return portal
 
     assert run(scenario()).booked == 1
+
+
+def test_evidence_may_span_page_elements_but_must_be_real():
+    from app.agent.runner import _norm
+
+    page = _norm("Your appointment is scheduled Confirmation number RB-41234")
+    assert _norm("Your appointment is scheduled. Confirmation number RB-41234.") in page
+    assert _norm("“Your appointment is scheduled”") in page
+    assert _norm("Your appointment is booked") not in page

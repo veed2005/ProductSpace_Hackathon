@@ -1,0 +1,50 @@
+/* Agent page ("call the internet") */
+.agent-page { display: grid; grid-template-columns: 300px minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; padding: 16px; height: calc(100vh - 78px); }
+.agent-page .panel { display: flex; flex-direction: column; min-height: 0; }
+.agent-page .scroll { overflow-y: auto; min-height: 0; }
+.browser-list, .task-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: 8px; }
+.browser { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.browser .b-top { display: flex; gap: 8px; align-items: center; }
+.browser .dot { width: 11px; height: 11px; border-radius: 50%; background: #9aa0a6; flex: none; }
+.browser.on .dot { background: #16a34a; box-shadow: 0 0 0 4px rgba(22, 163, 74, .18); }
+.browser .b-state { font-size: 13px; font-weight: 700; letter-spacing: .3px; margin-top: 4px; color: var(--muted, #5f646c); }
+.browser.on .b-state { color: #0b7a43; }
+.browser .b-tab { font-size: 13px; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-pick { width: 100%; text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 10px; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 2px; }
+.task-pick.active { border-color: var(--brand); background: #eef3fe; }
+.task-pick .t-goal { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-pick .t-meta { font-size: 12px; color: var(--muted, #5f646c); }
+.goal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.goal { font-size: 24px; font-weight: 800; line-height: 1.25; }
+.status { flex: none; font-weight: 800; font-size: 14px; padding: 6px 12px; border-radius: 999px; background: #e7e5df; }
+.status.working { background: #dfe9fc; color: #1d4ed8; }
+.status.waiting { background: #ebe3f9; color: #6a3db8; }
+.status.confirm { background: #fff1c2; color: #8a5a00; }
+.status.done { background: var(--ok-bg); color: var(--ok); }
+.status.stopped, .status.bad { background: var(--warn-bg); color: var(--warn); }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted, #5f646c); font-size: 14px; margin: 8px 0 12px; }
+.pending { background: #fff7d6; border: 2px solid #f0c33c; border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+.pending .p-head { font-weight: 800; }
+.pending .p-say { font-size: 18px; margin-top: 6px; }
+.result { background: var(--ok-bg); color: #0a5c33; border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font-weight: 600; }
+.feed { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; flex: 1; }
+.act { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: start; padding: 9px 4px; border-top: 1px solid var(--line); font-size: 16px; animation: slidein .35s ease; }
+.act .icon { font-size: 18px; font-weight: 800; text-align: center; }
+.act.ok .icon { color: #0b7a43; }
+.act.ask .icon { color: #6a3db8; }
+.act.confirm .icon { color: #a46a00; }
+.act.done .icon, .act.done { color: #0a5c33; font-weight: 700; }
+.act.bad .icon, .act .err { color: var(--warn); }
+.act.stopped .icon { color: var(--warn); }
+.act .why { font-size: 13px; color: var(--muted, #5f646c); margin-top: 2px; }
+.act .ms { font-size: 12px; color: var(--muted, #5f646c); font-variant-numeric: tabular-nums; }
+@keyframes slidein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.agent-convo { display: flex; flex-direction: column; gap: 8px; }
+.agent-convo .msg { max-width: 88%; padding: 8px 12px; border-radius: 12px; font-size: 15px; line-height: 1.35; }
+.agent-convo .msg.in { align-self: flex-end; background: #dfe9fc; }
+.agent-convo .msg.out { align-self: flex-start; background: #f1f0ec; }
+.agent-convo .who { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted, #5f646c); margin-bottom: 2px; }
+#agent-see { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+#agent-see summary { cursor: pointer; font-weight: 700; }
+#agent-see-meta { font-size: 13px; color: var(--muted, #5f646c); margin: 6px 0; }
+#agent-see-body { font: 12px/1.45 ui-monospace, Consolas, monospace; white-space: pre-wrap; background: #f7f6f2; border-radius: 8px; padding: 10px; max-height: 38vh; overflow: auto; margin: 0; }
