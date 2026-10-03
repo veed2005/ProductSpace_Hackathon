@@ -1,0 +1,2 @@
+# Append-only logs: when two branches both add entries at the end, keep both instead of conflicting.
+docs/TRADEOFFS.md merge=union
