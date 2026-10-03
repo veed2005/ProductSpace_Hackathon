@@ -203,6 +203,15 @@ Format: decision, alternatives considered, why.
 **Voice: keypad digits are buffered and sent as one turn on `#`, at 4 digits, or after a 2-second pause.**
 - Why: a PIN typed on the keypad arrives as four separate `dtmf` messages; the brain should see "1234", and a single "1" for a menu choice still goes through after the pause.
 
+**PIN lockout: 3 wrong attempts in a row lock the profile until a partner resets it; no timed unlock.**
+- Alternatives: a 15-minute cool-off; lock per session instead of per profile.
+- Why: with only 10,000 PINs, a timed unlock still lets someone holding the phone keep guessing. Per profile (not per session), so switching from a call to a text doesn't reset the count. A correct PIN clears the count. Risk: a person who fumbles the PIN three times is stuck until a partner clicks Reset PIN, which is the partner-only reset the brief asks for.
+
+**Lockout counts live in a new `PinGuard` table with no foreign key, not in new `Profile` columns.**
+- Why: `create_all` adds new tables to existing databases but never adds columns, so new columns would have forced every teammate to delete `data/formline.db`. Without a foreign key, "forget me" and demo reset keep working unchanged; the table holds only counts and timestamps.
+
+**Switching the person on a shared phone (`select_profile`) drops the PIN verification and active task.**
+- Why: James's verified PIN must never unlock Denise's details, and James's half-filled form isn't Denise's. The conversation `state`/`pending` stay with the brain, which decides what to say next.
 **Reminders: an in-process APScheduler job checks every minute; sending first claims the row (`pending` → `sending`).**
 - Alternatives: a separate worker process; Twilio's own scheduled messages.
 - Why: one process is simplest for a demo laptop, and a minute's precision is plenty for deadline reminders. The atomic claim means the scheduler and the dashboard's "Send now" can never text the same reminder twice. The first check runs a minute after startup, which also keeps the job from firing inside short-lived test apps.
