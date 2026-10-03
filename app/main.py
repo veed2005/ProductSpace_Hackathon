@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.contracts import TurnRequest, TurnResult
 from app.core.turn import handle_turn
 from app.dashboard import routes as dashboard
+from app.dashboard.demo import sync_forms
 from app.db import init_db
 
 logging.basicConfig(level=get_settings().log_level)
@@ -20,6 +21,7 @@ logging.basicConfig(level=get_settings().log_level)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    sync_forms()  # Task.form_id references the Form table; mirror forms/ into it
     reminders.start_scheduler()
     yield
     reminders.stop_scheduler()

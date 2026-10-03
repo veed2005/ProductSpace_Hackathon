@@ -71,3 +71,15 @@ def test_dev_turn_endpoint_is_off_by_default():
 
     with TestClient(app) as client:
         assert client.post("/dev/turn", json={"phone": "+1555", "channel": "sms", "text": "hi"}).status_code == 404
+
+
+def test_startup_syncs_form_library_so_tasks_can_reference_forms():
+    from app.db import session_scope
+    from app.main import app
+    from app.models import Task
+
+    with TestClient(app):
+        p = identity.create_profile("+15550003333")
+        with session_scope() as s:
+            s.add(Task(profile_id=p.id, kind="fill_form", form_id="sample_benefits"))
+            s.commit()
