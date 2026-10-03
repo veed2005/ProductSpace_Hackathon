@@ -181,6 +181,7 @@ class BrowserAgent:
         self.transcript: list[tuple[str, str]] = []
         self.history: list[str] = []
         self._done_steps: list[tuple[str, str, str]] = []  # (page, action, element label) actually run, this task
+        self._last_seen: Optional[PageState] = None  # the page as the model last saw it, to mark what changed
         self.notes: list[str] = []
         self.inbox: list[str] = []
         self.steps = 0
@@ -443,7 +444,7 @@ class BrowserAgent:
                     errors += 1
                     break
                 errors = 0
-                if result.page_changed and step.action in ("click", "press_enter", "go_back", "navigate"):
+                if result.page_changed and step.action in ("click", "press_enter", "go_back", "navigate", "search"):
                     break  # look at the new page before doing more
             if errors >= MAX_ERRORS:
                 break
@@ -490,7 +491,9 @@ class BrowserAgent:
         self.notes = []
         # The page comes first: a long PDF stays an identical prefix across follow-up questions, which the
         # provider can cache.
-        user = (f"CURRENT PAGE:\n{page_text(page)}\nEND OF PAGE\n\n"
+        shown = page_text(page, previous=self._last_seen)
+        self._last_seen = page
+        user = (f"CURRENT PAGE:\n{shown}\nEND OF PAGE\n\n"
                 f"Caller's goal: {self.goal}\n\nConversation so far (most recent last):\n{convo}\n\n"
                 f"Steps you have taken in the browser:\n{steps}\n\nNotes for this turn:\n{notes}")
         content: object = user
@@ -536,10 +539,11 @@ class BrowserAgent:
 
     def _repeating(self, step: Step, page: PageState) -> Optional[str]:
         """The same click twice already in the last few steps means it isn't working: make the model change tack."""
-        if step.action not in ("click", "press_enter"):
+        if step.action not in ("click", "press_enter", "search"):
             return None
         el = page.control(step.element_id)
-        key = (_page_key(page), step.action, (el.label if el else step.element_id or "").strip().lower())
+        what = (step.value or "") if step.action == "search" else (el.label if el else step.element_id or "")
+        key = (_page_key(page), step.action, what.strip().lower())
         if sum(1 for k in self._done_steps[-5:] if k == key) >= 2:
             return (f"You already did {step.action} on {key[2]!r} twice on this page and it didn't get you closer. Don't do it "
                     "again: try something different (the site's search box or icon, a menu, another link), or ask "
@@ -551,10 +555,13 @@ class BrowserAgent:
         label = el.label if el else (step.value or step.action)
         started = time.perf_counter()
         result = await self.browser.act(step, page.doc_id)
-        self._done_steps.append((_page_key(page), step.action, (label or "").strip().lower()))
+        key_what = (step.value or "") if step.action == "search" else (label or "")
+        self._done_steps.append((_page_key(page), step.action, key_what.strip().lower()))
+        if step.action == "search":  # what the search routine did, in its own words
+            label = result.detail or (f"search box {el.label!r}" if el else "the site search")
         ms = round((time.perf_counter() - started) * 1000)
         shown = None
-        if step.action in ("type", "select", "navigate", "scroll") and step.value:
+        if step.action in ("type", "select", "navigate", "scroll", "search") and step.value:
             shown = mask(step.value)[:200]
         store.add_action(self.task_id, step.action, element_label=label, value=shown, reason=reason,
                          ok=result.success, error=result.error, url_before=result.url_before,
@@ -564,7 +571,10 @@ class BrowserAgent:
         outcome = "ok" if result.success else f"FAILED ({result.error})"
         changed = ", page changed" if result.page_changed else ""
         typed = f" = {shown!r}" if shown else ""
-        self.history.append(f"{step.action} [{step.element_id}] {label!r}{typed} -> {outcome}{changed}")
+        if step.action == "search":
+            self.history.append(f"search for {shown!r} -> {outcome}: {result.detail or 'no details'}")
+        else:
+            self.history.append(f"{step.action} [{step.element_id}] {label!r}{typed} -> {outcome}{changed}")
         return result
 
     @staticmethod

@@ -21,7 +21,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-ActionName = Literal["click", "type", "clear", "select", "check", "uncheck", "press_enter", "scroll",
+ActionName = Literal["search", "click", "type", "clear", "select", "check", "uncheck", "press_enter", "scroll",
                      "go_back", "navigate", "focus"]
 ACTIONS: tuple[str, ...] = ActionName.__args__  # type: ignore[attr-defined]
 

@@ -112,6 +112,14 @@
     return !!(el.closest("[role=search], search") || (form && SEARCH_HINT.test((form.getAttribute("action") || "") + " " + form.id + " " + form.className)));
   }
 
+  // Really on screen: not hidden, not transparent, not collapsed to nothing. A search field that is still
+  // sliding open, or folded to zero width, isn't somewhere a person could type yet.
+  function shownEnough(el) {
+    if (el.checkVisibility && !el.checkVisibility({ checkVisibilityCSS: true, opacityProperty: true, visibilityProperty: true })) return false;
+    const r = el.getBoundingClientRect();
+    return r.width >= 4 && r.height >= 4;
+  }
+
   function textOf(el) {
     return (el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
   }
@@ -304,6 +312,9 @@
 
       const isDialog = role === "dialog" || role === "alertdialog" || (el.tagName === "DIALOG" && el.open);
       const nowInDialog = inDialog || isDialog;
+      const typable = (el.tagName === "INPUT" || el.tagName === "TEXTAREA") &&
+        ["textbox", "searchbox", "combobox", "password", "spinbutton"].includes(role);
+      if (typable && !shownEnough(el)) return { interactive: false, loose: "" };  // collapsed or invisible
       if (role && CONTROL_ROLES.has(role)) {
         items.push(controlItem(el, role, nowInDialog));
         return { interactive: true, loose: "" };
@@ -358,9 +369,11 @@
 
     if (document.body) visit(document.body, false);
     const elements = items.filter(Boolean);
-    if (!elements.some((e) => e.role === "searchbox")) {
+    // No usable site search on screen (only, say, a filter for one person's reviews): point out a hidden one.
+    const SCOPED = /(\w+['’]s\b|\bwithin\b|\bfilter\b|\byour\b|\bmy\b)/i;
+    if (!elements.some((e) => e.role === "searchbox" && !SCOPED.test(e.label || ""))) {
       const hidden = [...document.querySelectorAll("input:not([type=hidden]), textarea")].find((i) =>
-        (i.type === "search" || looksLikeSearch(i)) && !(i.checkVisibility ? i.checkVisibility({ checkVisibilityCSS: true }) : i.offsetParent));
+        (i.type === "search" || looksLikeSearch(i)) && !shownEnough(i));
       if (hidden) elements.unshift({ role: "text", label: "(Note: this page has a search box that is hidden right now; a search " +
         "button, link or magnifying-glass icon opens it.)" });
     }
@@ -386,5 +399,6 @@
     return name ? clean(name, 80) : null;
   }
 
-  globalThis.FormlineObserver = { DOC_ID, snapshot, lookup, roleOf, isSensitiveField, nameOf };
+  globalThis.FormlineObserver = { DOC_ID, snapshot, lookup, roleOf, isSensitiveField, nameOf, assignId, looksLikeSearch,
+    shownEnough, clean: (t) => clean(t, MAX_LABEL) };
 })();

@@ -63,6 +63,15 @@ async def library_checks(page) -> dict:
     }
 
 
+async def arrival_checks(page) -> dict:
+    return {"ended on Arrival's search results or film page": "arrival" in page.url.lower()}
+
+
+async def explore_checks(page) -> dict:
+    body = (await page.inner_text("main")).lower()
+    return {"Past Lives results shown": "past-lives" in page.url or "result for “past lives”" in body}
+
+
 async def letterboxd_checks(page) -> dict:
     return {"ended on a search result or film page": any(p in page.url for p in ("/search", "/film"))}
 
@@ -89,6 +98,28 @@ SCENARIOS = {
         "must_type": "avengers",
         "persona": """You are Evan, a film fan. You want to look up the Avengers. If asked which one, say the \
 original one from 2012. Keep answers short.""",
+    },
+    "reelbox_profile": {
+        # Like the live Letterboxd call: start on the person's profile, with decoy search boxes around.
+        "path": "/demo/reelbox/profile.html",
+        "site_word": "Reelbox",
+        "opening": "I wanna search for a movie.",
+        "done": r"\b(found|here|showing|results?|opened|open)\b",
+        "checks": arrival_checks,
+        "must_type": "arrival",
+        "avoid": ["reviews and lists", "search for film", "more...", "log"],
+        "persona": """You are Evan, a film fan. The movie you want is Arrival. If asked which movie, say Arrival. \
+If asked which one of several, say the 2016 one. Keep answers short.""",
+    },
+    "reelbox_explore": {
+        # A search widget with no form and no Enter handling: only its Go button works.
+        "path": "/demo/reelbox/explore.html",
+        "site_word": "Reelbox",
+        "opening": "Find the movie Past Lives for me.",
+        "done": r"\b(found|here|showing|results?|opened|open)\b",
+        "checks": explore_checks,
+        "must_type": "past lives",
+        "persona": """You are Evan, a film fan. You want the movie Past Lives. Keep answers short.""",
     },
     "reelbox_vague": {
         "path": "/demo/reelbox/index.html",
@@ -200,6 +231,8 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
                 print(f"  FORMLINE: {line}", flush=True)
                 return line or ""
 
+            hear.queue = call.queue
+
             async def say(text: str) -> None:
                 transcript.append(f"CALLER:   {text}")
                 print(f"  CALLER:   {text}", flush=True)
@@ -261,9 +294,14 @@ async def one_run(pw, server: Server, scenario: dict, args, run: int) -> dict:
             checks["task verified complete"] = checks["task verified complete"] or any(
                 k == "answer" and v for k, _, _, v in actions)
             checks[f"typed {scenario['must_type']!r} into the site's search"] = any(
-                k == "type" and scenario["must_type"] in (v or "").lower() for k, _, _, v in actions)
+                k in ("type", "search") and scenario["must_type"] in (v or "").lower() for k, _, _, v in actions)
         else:
             checks["confirmation asked before the final step"] = any(k == "confirm_request" for k, _, _, _ in actions)
+        if scenario.get("avoid"):
+            used = [label for k, label, _, _ in actions if k in ("click", "type", "press_enter")
+                    and any(a == (label or "").strip().lower() or (len(a) > 4 and a in (label or "").lower())
+                            for a in scenario["avoid"])]
+            checks["stayed away from the decoys (profile search, LOG dialog, More...)"] = not used
         return {"checks": checks, "total_s": round(total, 1), "turn_s": [round(t, 1) for t in turn_times],
                 "steps": status[1] if status else None, "model_calls": status[2] if status else None,
                 "actions": actions}
@@ -284,12 +322,17 @@ async def qa_run(scenario, hear, say, transcript, server, started) -> dict:
     checks = {"explained the document when asked": len(first.split()) >= 12 and "trouble" not in first.lower()}
     turn_times = []
     for question, needles in scenario["questions"]:
+        await asyncio.sleep(0.6)
+        while not hear.queue.empty():  # a late extra line from the previous turn must not be read as this answer
+            transcript.append(f"FORMLINE: {hear.queue.get_nowait()}")
         await say(question)
         answer, secs = await reply()
         turn_times.append(secs)
         low = answer.lower().replace(",", "")
         ok = all(any(alt.lower().replace(",", "") in low for alt in n.split("|")) for n in needles)
         checks[f"answered {question!r}"] = ok
+        if not ok:
+            print(f"  ANSWER TO {question!r} WAS: {answer!r}")
     db = sqlite3.connect(server.data_dir / "formline.db")
     rows = db.execute("select kind, element_label, ok, value from browseraction where task_id = "
                       "(select max(id) from browsertask) order by id").fetchall()

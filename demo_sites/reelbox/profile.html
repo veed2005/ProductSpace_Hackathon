@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="reelbox.css">
+<title>Linky’s profile • Reelbox</title></head>
+<body><header></header>
+<main><h1>Linky <small>PATRON</small></h1>
+<p>412 films · 38 this year · 12 lists · following 51</p>
+<nav aria-label="Profile"><a href="#">Profile</a> <a href="#">Activity</a> <a href="#">Films</a> <a href="#">Diary</a>
+  <a href="#">Reviews</a> <a href="#">Watchlist</a> <a href="#">Lists</a> <a href="#">Likes</a></nav>
+<p><input type="search" id="profile-search" class="profile-search" placeholder="Search Linky’s reviews and lists"
+  aria-label="Search Linky’s reviews and lists"></p>
+<p id="profile-results"></p>
+<section><h2>Favorite films</h2><ul class="grid" id="favorites"></ul><a href="#" id="more" onclick="return false">More...</a></section>
+<section><h2>Recent activity</h2><ul class="grid" id="recent"></ul></section></main>
+<script src="reelbox.js"></script><script>
+renderProfile();
+document.getElementById("favorites").innerHTML = FILMS.filter((f) => ["the-iron-giant", "paddington-2", "past-lives", "the-ritual"].includes(f.id)).map(posterLink).join("");
+document.getElementById("recent").innerHTML = FILMS.filter((f) => ["endgame", "infinity-war"].includes(f.id)).map(posterLink).join("");
+</script></body></html>

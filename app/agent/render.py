@@ -52,17 +52,44 @@ def element_line(e: PageElement) -> str:
     return " ".join(parts)
 
 
-def page_text(state: PageState) -> str:
+def _changes(state: PageState, previous: Optional[PageState]) -> tuple[Optional[str], set[int]]:
+    """What's new since the agent's last look: a summary line and the indexes of new items. Element ids are
+    stable within a document, so a new id is a new control; text is compared by content."""
+    if previous is None:
+        return None, set()
+    if previous.doc_id != state.doc_id:
+        return "This is a different page from your last look.", set()
+    old_ids = {e.id for e in previous.elements if e.id}
+    old_text = {(e.role, e.label) for e in previous.elements if not e.id}
+    new = {i for i, e in enumerate(state.elements) if (e.id not in old_ids if e.id else (e.role, e.label) not in old_text)}
+    cur_ids = {e.id for e in state.elements if e.id}
+    cur_text = {(e.role, e.label) for e in state.elements if not e.id}
+    gone = len(old_ids - cur_ids) + len(old_text - cur_text)
+    moved = " The address changed." if previous.url != state.url else ""
+    if state.elements and len(new) > 0.7 * len(state.elements):
+        return "Most of the page changed since your last look." + moved, set()
+    if not new and not gone:
+        return "Nothing changed since your last look." + moved, set()
+    return (f"Since your last look: {len(new)} new item(s), marked with + at the start of the line; "
+            f"{gone} item(s) disappeared.{moved}"), new
+
+
+def page_text(state: PageState, previous: Optional[PageState] = None) -> str:
+    """The page as the model reads it. With `previous` (what it saw last time), new lines are marked with +."""
     u = urlparse(state.url)
     location = (u.path or "/") + (("#" + u.fragment) if u.fragment else "")
     head = [f"Site: {site_name(state)}", f"Title: {state.title}", f"Address: {u.netloc}{location}"]
+    summary, new = _changes(state, previous)
+    if summary:
+        head.append(summary)
     if state.dialog_open:
         head.append("A dialog is open; deal with it first.")
     if state.truncated:
         head.append("Snapshot truncated (very long page); scroll down to see the rest.")
     if state.document is not None:
         head.append(describe(state.document))
-    return "\n".join(head + [""] + [element_line(e) for e in state.elements])
+    lines = [("+ " if i in new else "") + element_line(e) for i, e in enumerate(state.elements)]
+    return "\n".join(head + [""] + lines)
 
 
 _LOADING = re.compile(r"^(loading|please wait|cargando|espere)|^(processing|one moment|un momento)[\s.…!]*$|"
@@ -114,8 +141,9 @@ def site_name(state: PageState) -> str:
     for p in candidates:  # "Linky's profile • Letterboxd" on letterboxd.com -> "Letterboxd"
         if host and squash(p) and (squash(p) in squash(host) or squash(host) in squash(p)):
             return p
-    if len(candidates) > 1:  # "Appointments - MyChart", "Reelbox • Social film discovery": the short one
-        return min(candidates, key=len)
+    if len(candidates) > 1:  # "Appointments - MyChart", "Reelbox • Social film discovery": the short one;
+        shortest = min(len(p) for p in candidates)  # a tie goes to the last part ("Explore • Reelbox")
+        return [p for p in candidates if len(p) == shortest][-1]
     if host:
         return host
     return candidates[0] if candidates else "a web page"

@@ -21,6 +21,7 @@
   function actionRow(a) {
     const L = a.element_label, V = a.value;
     const rows = {
+      search: ["🔍", `Searched the site for ${q(V)}<div class="why">${esc(L)}</div>`],
       click: ["✓", `Clicked ${q(L)}`], type: ["✓", `Typed ${q(V)} into ${q(L)}`],
       select: ["✓", `Chose ${q(V)} in ${q(L)}`], check: ["✓", `Checked ${q(L)}`], uncheck: ["✓", `Unchecked ${q(L)}`],
       clear: ["✓", `Cleared ${q(L)}`], press_enter: ["✓", `Pressed Enter in ${q(L)}`],

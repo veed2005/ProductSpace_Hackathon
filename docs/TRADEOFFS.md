@@ -312,3 +312,16 @@ Format: decision, alternatives considered, why.
 
 **The same click on an unchanged page is refused the third time.**
 - Why: that "More..." loop. "Unchanged" means the same address and headings, so a wizard's "Next" on each new step is never refused (the first version of this guard keyed on the label alone and broke the booking flow).
+
+**Searching a site is one `search` action carried out by the extension, not a series of model clicks.**
+- Alternatives: better prompts for click/type/press_enter; the DevTools protocol for real keystrokes.
+- Why: in a live Letterboxd call the model opened the header search, didn't see it open in time, clicked the icon again (closing it), used the profile-only search, wandered into the "log a film" dialog, and pressed Enter twice in a box that only takes clicked suggestions. A test site rebuilt to behave the same way reproduced it 0/3; after the change 3/3 in one step. The routine encodes what a careful person does: pick the site's main search box (scored by header/search-form/name=q, penalised for "Linky's reviews", "filter", dialogs), click the opener once and wait until the box has finished opening, type key by key, wait up to 1.5 s for suggestions, then submit by Enter, by the form, or by the search/Go button, and say which. The model still decides what to search for and which result to open. Real keystrokes through the DevTools protocol would show a "debugging this browser" bar; key-by-key synthetic events were enough for the patterns tested.
+
+**Each look at the page marks what's new since the last look (+) and counts what disappeared.**
+- Why: the agent couldn't tell its click had opened something, so it repeated it. Ids are stable within a document, so "new" is exact for controls; text is compared by content. A whole new page is said plainly instead of marking everything.
+
+**A text box counts as visible only if it's really open: not transparent, not collapsed to zero width.**
+- Why: a collapsed search field was "visible" to CSS checks; the agent typed into an invisible box. Now the snapshot leaves it out and says a hidden search box exists.
+
+**"Did the page react?" is measured by content added, not by the number of change events.**
+- Why: a page that draws results with one innerHTML assignment produces a single mutation; the first version missed it and reported that the Go button did nothing.

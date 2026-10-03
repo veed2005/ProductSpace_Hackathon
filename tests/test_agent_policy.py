@@ -141,3 +141,38 @@ def test_page_text_and_friendly_site_name():
     assert site_name(page(title="\u200eLinky’s profile • Letterboxd", url="https://letterboxd.com/x/")) == "Letterboxd"
     assert site_name(page(title="Reelbox • Social film discovery", url="http://127.0.0.1:8000/x")) == "Reelbox"
     assert site_name(page(title="Your appointment is scheduled - MyRiverbend", url="http://localhost/")) == "MyRiverbend"
+
+
+# ---------------------------------------------------------------- the search action
+
+def test_search_needs_words_and_only_a_text_box_if_one_is_named():
+    p = page(E("q", "searchbox", "Search"), E("b", "button", "Go"), E("pw", "password", "Password", sensitive=True))
+    assert validate_step(S("search", None, "Arrival"), p) is None  # the site search, found by the extension
+    assert validate_step(S("search", "q", "Arrival"), p) is None
+    assert "needs the words" in validate_step(S("search", None, " "), p)
+    assert "not a search box" in validate_step(S("search", "b", "Arrival"), p)
+    assert "not a search box" in validate_step(S("search", "pw", "Arrival"), p)
+    assert "not an element" in validate_step(S("search", "e99", "Arrival"), p)
+    assert not is_consequential(S("search", None, "Arrival"), p)  # searching changes nothing
+
+
+# ---------------------------------------------------------------- what changed since the last look
+
+def test_new_items_are_marked_and_disappearances_counted():
+    before = page(H("Films"), E("e1", "button", "search (icon)"), E("e2", "link", "More..."),
+                  PageElement(role="text", label="(Note: this page has a search box that is hidden right now)"))
+    after = page(H("Films"), E("e1", "button", "search (icon)"), E("e2", "link", "More..."),
+                 E("e9", "searchbox", "Search…"))
+    text = page_text(after, previous=before)
+    assert "1 new item(s), marked with +" in text and "1 item(s) disappeared" in text
+    assert '+ [e9] searchbox "Search…"' in text
+    assert "+ [e1]" not in text and "+ # Films" not in text
+
+
+def test_a_new_document_or_a_whole_new_page_is_said_plainly():
+    before = page(H("Films"), E("e1", "link", "A"), doc="d1")
+    assert "different page" in page_text(page(H("Results"), E("e1", "link", "B"), doc="d2"), previous=before)
+    swapped = page(H("Results"), E("e7", "link", "X"), E("e8", "link", "Y"), E("e9", "link", "Z"), doc="d1")
+    assert "Most of the page changed" in page_text(swapped, previous=before)
+    assert "+ " not in page_text(swapped, previous=before).split("\n\n", 1)[1]
+    assert "Nothing changed" in page_text(before, previous=before)

@@ -9,6 +9,7 @@ let serverUrl = DEFAULT_SERVER;
 let lastTabKey = "";
 let lastEligibleTabId = null;
 const childTabs = new Map(); // opener tab id -> newest tab it opened (links with target=_blank)
+const searchProgress = new Map(); // tab id -> what a search did before its page unloaded
 
 const conn = new Connection({ onMessage, onStatus });
 
@@ -112,6 +113,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return undefined;
   if (msg.kind === "formline_page_changed" && sender.tab) {
     conn.send({ type: "page_changed", tab_id: sender.tab.id, url: msg.url, title: msg.title });
+    return undefined;
+  }
+  if (msg.kind === "formline_search_progress" && sender.tab) {
+    searchProgress.set(sender.tab.id, msg.detail);
     return undefined;
   }
   if (msg.kind === "formline_status") {
@@ -275,10 +280,12 @@ async function run(action, args, tabId) {
   }
 
   const startedAt = Date.now();
+  searchProgress.delete(tab.id);
   const res = await sendToTab(tab.id, { kind: "formline", action, args });
   let data;
   if (res.navigated) {
-    data = { success: true, action, url_before: urlBefore, page_changed: true, navigating: true };
+    data = { success: true, action, url_before: urlBefore, page_changed: true, navigating: true,
+      detail: searchProgress.get(tab.id) || null };
   } else if (!res.ok) {
     throw err(res.error, res.detail);
   } else {

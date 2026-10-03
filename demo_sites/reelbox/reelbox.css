@@ -4,11 +4,25 @@ header { display: flex; align-items: center; gap: 22px; padding: 14px 32px; back
 .logo b { color: #00e054; font-weight: 800; }
 nav { display: flex; gap: 18px; }
 nav a { color: #9ab; text-decoration: none; font-weight: 700; text-transform: uppercase; font-size: 13px; letter-spacing: .5px; }
-.nav-search-toggle { background: none; border: 0; color: #9ab; cursor: pointer; padding: 6px; margin-left: auto; }
-.nav-search { display: flex; gap: 6px; }
-.nav-search[hidden] { display: none; }
-.nav-search input { background: #2c3440; border: 0; border-radius: 4px; color: #fff; padding: 7px 10px; }
-.nav-search .go { background: #00ac1c; color: #fff; border: 0; border-radius: 4px; padding: 0 10px; cursor: pointer; }
+.nav-search { display: flex; align-items: center; gap: 4px; margin-left: auto; position: relative; }
+.search-form { position: relative; }
+.search-field { width: 0; opacity: 0; visibility: hidden; padding: 7px 0; border: 0; border-radius: 4px; background: #2c3440;
+  color: #fff; transition: width .3s ease, opacity .3s ease, padding .3s ease; }
+.nav-search.opening .search-field { width: 220px; padding: 7px 10px; }
+.nav-search.open .search-field { width: 220px; opacity: 1; visibility: visible; padding: 7px 10px; }
+.search-toggle { background: none; border: 0; color: #9ab; cursor: pointer; padding: 6px; }
+.ac { position: absolute; top: 36px; left: 0; z-index: 5; list-style: none; margin: 0; padding: 4px 0; width: 260px;
+  background: #fff; border-radius: 4px; box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.ac a { display: block; padding: 6px 12px; color: #14181c; text-decoration: none; }
+.ac a:hover { background: #e8eef4; }
+.log-button { background: #00ac1c; color: #fff; border: 0; border-radius: 4px; padding: 6px 12px; font-weight: 700; cursor: pointer; }
+#log-dialog { position: fixed; top: 120px; left: 50%; transform: translateX(-50%); width: 420px; background: #2c3440;
+  border-radius: 8px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,.6); z-index: 10; }
+#log-dialog .log-search { width: 100%; box-sizing: border-box; padding: 9px; border-radius: 4px; border: 0; }
+#log-dialog .ac { position: static; width: auto; }
+.profile-search { background: #2c3440; border: 0; border-radius: 4px; color: #fff; padding: 7px 10px; width: 260px; }
+.explore input { padding: 9px; border-radius: 4px; border: 0; width: 260px; }
+.explore button { padding: 9px 14px; border: 0; border-radius: 4px; background: #00ac1c; color: #fff; cursor: pointer; }
 .avatar { color: #fff; text-decoration: none; font-weight: 700; }
 main { max-width: 960px; margin: 30px auto; padding: 0 20px; }
 h1 { color: #fff; font-weight: 400; }

@@ -50,6 +50,17 @@ def validate_step(step: Step, page: PageState) -> Optional[str]:
             return "a radio option can't be unchecked; choose a different option instead"
         if step.action == "press_enter" and el.role not in TEXT_ROLES:
             return "press_enter only works in a text field"
+    elif step.action == "search":
+        if not (step.value or "").strip():
+            return "search needs the words to search for in value"
+        if len(step.value) > 200:
+            return "search words are too long"
+        if step.element_id:
+            el = page.control(step.element_id)
+            if el is None:
+                return f"{step.element_id!r} is not an element on the current page; leave element_id null to use the site search"
+            if el.role not in TEXT_ROLES or el.sensitive:
+                return f"[{el.id}] is a {el.role}, not a search box; leave element_id null to use the site search"
     elif step.action == "scroll":
         if (step.value or "down").lower() not in SCROLL_VALUES:
             return "scroll value must be up, down, top or bottom"

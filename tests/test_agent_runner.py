@@ -534,3 +534,55 @@ def test_agent_follows_the_person_to_another_tab():
     first, second, switched, again = asyncio.run(scenario())
     assert first.tab_id == 1 and second.tab_id == 2
     assert switched == "Letterboxd" and again is None
+
+
+
+def test_search_is_one_step_and_its_report_reaches_the_model():
+    from app.browser.protocol import ActionResult, PageElement, PageState
+
+    pages = {"before": PageState(doc_id="d", url="https://films.test/", title="Films",
+                                 elements=[PageElement(id="t", role="button", label="search (icon)")]),
+             "after": PageState(doc_id="d2", url="https://films.test/search?q=arrival", title="Results",
+                                elements=[PageElement(role="heading", label="Results for Arrival", level=1),
+                                          PageElement(id="r1", role="link", label="Arrival (2016)")])}
+    state = {"now": "before"}
+
+    class Site(FakeBrowser):
+        async def page_state(self, *, fresh=False):
+            return pages[state["now"]]
+
+        async def act(self, step, doc_id):
+            state["now"] = "after"
+            return ActionResult(success=True, action="search", page_changed=True, url_after=pages["after"].url,
+                                detail="opened the search with “search (icon)”; typed “Arrival” into “Search…”; "
+                                       "submitted it; a new page opened")
+
+    seen = []
+
+    async def model(system, messages):
+        seen.append(messages[-1]["content"])
+        if len(seen) == 1:
+            return Decision(kind="act", steps=[S("search", None, "Arrival")], say="Looking that up.", reason="x",
+                            evidence=None)
+        return Decision(kind="done", steps=[], say="Found Arrival.", reason="x", evidence="Results for Arrival")
+
+    from app.core import identity
+
+    profile = identity.create_profile("+15550005555", display_name="Evan")
+
+    async def say(text):
+        pass
+
+    agent = BrowserAgent(browser=Site(), say=say, profile_id=profile.id, installation_id="b", phone="+15550005555",
+                         decide=model)
+
+    async def scenario():
+        await agent.handle("Look up Arrival")
+        await settle(agent)
+
+    run(scenario())
+    assert "search for 'Arrival' -> ok: opened the search with" in seen[1]
+    assert "different page from your last look" in seen[1]
+    row = actions("search")[0]
+    assert row.value == "Arrival" and row.element_label.startswith("opened the search with")
+    assert agent.status == "completed"

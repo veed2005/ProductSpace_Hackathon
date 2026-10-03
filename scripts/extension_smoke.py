@@ -92,6 +92,23 @@ def main() -> int:
             r = server.command("type", element_id=pw_field["id"], doc_id=s["doc_id"], value="x")
             assert not r["success"] and r["error"] == "blocked", r
             print("privacy: password/hidden/card/SSN values withheld; typing into password refused")
+
+            # The search action on a Letterboxd-like page: a decoy profile search is visible, the site search is
+            # hidden behind an animated icon, and Enter only works through the browser's form submission.
+            page.goto(server.url + "/demo/reelbox/profile.html")
+            time.sleep(1.0)
+            s = server.command("get_page_state")
+            assert "hidden right now" in s["elements"][0]["label"]
+            r = server.command("search", value="Arrival", doc_id=s["doc_id"])
+            assert r["success"] and "search.html?q=Arrival" in r["url_after"], r
+            assert "opened the search with" in (r["detail"] or ""), r
+            print("search: opened the hidden site search, typed, submitted ->", r["url_after"].rsplit("/", 1)[-1])
+            page.goto(server.url + "/demo/reelbox/explore.html")
+            time.sleep(1.0)
+            s = server.command("get_page_state")
+            r = server.command("search", value="Past Lives", doc_id=s["doc_id"])
+            assert r["success"] and "Go" in r["detail"], r
+            print("search: no form and no Enter -> used the Go button")
             shot = server.command("screenshot")
             assert shot["ok"] and shot["jpeg_base64_chars"] > 1000, shot
             print(f"screenshot (opt-in vision fallback): {shot['jpeg_base64_chars']} base64 chars")

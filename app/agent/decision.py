@@ -13,14 +13,14 @@ from pydantic import BaseModel
 
 # What the model may do. `navigate` (typing an address) is deliberately left out: the agent uses the site's
 # own links, buttons and search box, so the person sees each step and nothing is guessed.
-AgentAction = Literal["click", "type", "clear", "select", "check", "uncheck", "press_enter", "scroll",
+AgentAction = Literal["search", "click", "type", "clear", "select", "check", "uncheck", "press_enter", "scroll",
                       "go_back", "focus"]
 
 
 class Step(BaseModel):
     action: AgentAction
-    element_id: Optional[str]  # an id from the current snapshot; null for scroll / go_back
-    value: Optional[str]  # text to type, option to select, or scroll direction
+    element_id: Optional[str]  # an id from the current snapshot; null for scroll / go_back / site search
+    value: Optional[str]  # words to search for, text to type, option to select, or scroll direction
 
 
 class Decision(BaseModel):
