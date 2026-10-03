@@ -1,0 +1,14 @@
+{
+  "form_id": "demo_snap",
+  "name": "Riverbend County SNAP Application",
+  "aliases": [
+    "beneficios de SNAP",
+    "SNAP benefits",
+    "Riverbend SNAP",
+    "Riverbend County SNAP",
+    "solicitud de SNAP",
+    "beneficios de comida de Riverbend"
+  ],
+  "agency": "Riverbend County Department of Human Services (fictional)",
+  "description": "A fake, short SNAP application for demonstrating phone-only form filling."
+}

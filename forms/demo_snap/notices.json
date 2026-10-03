@@ -1,0 +1,44 @@
+{
+  "findings": [
+    {
+      "category": "data_sharing",
+      "severity": "high",
+      "unusual": true,
+      "quote": "may also be shared with Riverbend Partner Network members for marketing of additional services and for research",
+      "explanation": "This section lets the county share your application information with other organizations for marketing and research, not just to process your application.",
+      "reason": "It goes beyond what's needed to decide your benefits, so you may want to ask your caseworker whether you can say no to it."
+    },
+    {
+      "category": "third_party_contact",
+      "severity": "medium",
+      "unusual": false,
+      "quote": "you authorize the Riverbend County Department of Human Services to verify your income with your employer, banks, and other agencies",
+      "explanation": "By signing, you allow the county to check your income with your employer, your bank and other agencies.",
+      "reason": "They may contact your employer or bank to confirm what you told them."
+    },
+    {
+      "category": "perjury_certification",
+      "severity": "medium",
+      "unusual": false,
+      "quote": "I certify under penalty of perjury that the information on this application is true and complete",
+      "explanation": "You are promising, under penalty of perjury, that everything on the application is true.",
+      "reason": "Giving false information on purpose can lead to legal penalties."
+    },
+    {
+      "category": "repayment",
+      "severity": "medium",
+      "unusual": false,
+      "quote": "you will have to pay them back, and you may be disqualified from the program",
+      "explanation": "If you get benefits you shouldn't have, you'll have to repay them and could be removed from the program.",
+      "reason": "Reporting accurately protects you from having to pay money back."
+    },
+    {
+      "category": "deadline",
+      "severity": "low",
+      "unusual": false,
+      "quote": "You must report changes in income of more than $100 within 10 days",
+      "explanation": "After you're approved, you must report income changes of more than $100 within 10 days.",
+      "reason": "Missing this deadline can mean repaying benefits."
+    }
+  ]
+}

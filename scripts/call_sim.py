@@ -72,8 +72,8 @@ class PhoneCall:
         """The next line Formline speaks (None when the call ends)."""
         return await asyncio.wait_for(self.queue.get(), timeout)
 
-    async def say(self, text: str) -> None:
-        await self.ws.send(json.dumps({"type": "prompt", "voicePrompt": text, "lang": "en-US", "last": True}))
+    async def say(self, text: str, lang: str = "en-US") -> None:
+        await self.ws.send(json.dumps({"type": "prompt", "voicePrompt": text, "lang": lang, "last": True}))
 
     async def key(self, digits: str) -> None:
         for d in digits:

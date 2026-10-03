@@ -257,3 +257,31 @@ def test_recording_off_by_default(client, brain, monkeypatch):
         ws.send_json(setup_msg())
         ws.receive_json()
     assert started == []
+
+
+# ---------------------------------------------------------------- automatic language detection
+
+
+def _autodetect(monkeypatch):
+    monkeypatch.setenv("FORMLINE_VOICE_AUTODETECT", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+
+
+def test_autodetect_listens_for_both_languages(client, monkeypatch):
+    _autodetect(monkeypatch)
+    relay = relay_element(client.post("/twilio/voice", data={"From": CALLER}).text)
+    assert relay.get("transcriptionLanguage") == "multi" and relay.get("speechModel") == "nova-3-general"
+
+
+def test_detected_language_reaches_the_brain_and_switch_keeps_listening_for_both(client, brain, monkeypatch):
+    _autodetect(monkeypatch)
+    brain.replies["hola"] = TurnResult(reply="¡Hola!", language="es")
+    with client.websocket_connect("/twilio/voice/relay") as ws:
+        ws.send_json(setup_msg())
+        ws.receive_json()
+        ws.send_json({"type": "prompt", "voicePrompt": "hola", "lang": "es-US", "last": True})
+        assert ws.receive_json() == {"type": "language", "ttsLanguage": "es-US"}  # recognition stays "multi"
+        assert ws.receive_json()["token"] == "¡Hola!"
+    assert brain.requests[-1].language_hint == "es-US"

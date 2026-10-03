@@ -1,0 +1,122 @@
+{
+  "form_id": "demo_snap",
+  "name": "Riverbend County SNAP Application",
+  "version": 1,
+  "reviewed": true,
+  "fields": [
+    {
+      "id": "applicant_name",
+      "label": "Full name",
+      "type": "text",
+      "required": true,
+      "profile_key": "full_name",
+      "group": "About you",
+      "question_hint": "What is your full name?",
+      "pdf_field": "applicant_name"
+    },
+    {
+      "id": "date_of_birth",
+      "label": "Date of birth",
+      "type": "date",
+      "required": true,
+      "profile_key": "date_of_birth",
+      "group": "About you",
+      "question_hint": "What is your date of birth?",
+      "pdf_field": "date_of_birth"
+    },
+    {
+      "id": "address",
+      "label": "Home address",
+      "type": "address",
+      "required": true,
+      "profile_key": "address",
+      "group": "About you",
+      "question_hint": "What is your home address, including the city and ZIP code?",
+      "pdf_field": "address"
+    },
+    {
+      "id": "phone",
+      "label": "Phone number",
+      "type": "phone",
+      "required": false,
+      "profile_key": "phone",
+      "group": "About you",
+      "question_hint": "What is the best phone number to reach you?",
+      "pdf_field": "phone"
+    },
+    {
+      "id": "ssn_last4",
+      "label": "Last 4 of Social Security number",
+      "type": "ssn_last4",
+      "required": false,
+      "profile_key": "ssn_last4",
+      "sensitive": true,
+      "group": "About you",
+      "question_hint": "What are the last four digits of your Social Security number? You can skip this.",
+      "pdf_field": "ssn_last4"
+    },
+    {
+      "id": "household_size",
+      "label": "People in household",
+      "type": "number",
+      "required": true,
+      "profile_key": "household_size",
+      "group": "Household",
+      "question_hint": "Including you, how many people live in your home?",
+      "pdf_field": "household_size"
+    },
+    {
+      "id": "employed",
+      "label": "Anyone working",
+      "type": "yes_no",
+      "required": true,
+      "group": "Income",
+      "question_hint": "Does anyone in your home have a job right now?",
+      "pdf_values": {
+        "yes": "Yes",
+        "no": "Off"
+      },
+      "pdf_field": "employed"
+    },
+    {
+      "id": "employer",
+      "label": "Employer",
+      "type": "text",
+      "required": true,
+      "profile_key": "employment.employer",
+      "group": "Income",
+      "condition": {
+        "field": "employed",
+        "equals": "yes"
+      },
+      "question_hint": "Who do they work for?",
+      "pdf_field": "employer"
+    },
+    {
+      "id": "monthly_income",
+      "label": "Monthly income from work",
+      "type": "money",
+      "required": true,
+      "period": "month",
+      "profile_key": "monthly_income",
+      "group": "Income",
+      "condition": {
+        "field": "employed",
+        "equals": "yes"
+      },
+      "question_hint": "About how much does your household earn from work, before taxes?",
+      "pdf_field": "monthly_income"
+    },
+    {
+      "id": "rent_amount",
+      "label": "Monthly rent",
+      "type": "money",
+      "required": true,
+      "period": "month",
+      "profile_key": "housing_cost",
+      "group": "Housing costs",
+      "question_hint": "How much is your rent each month?",
+      "pdf_field": "rent_amount"
+    }
+  ]
+}

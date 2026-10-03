@@ -137,7 +137,14 @@ def task_view(task: Task) -> dict:
         "counts": counts, "fields": fields,
         "verification": task.verification or None,
         "has_pdf": bool(task.output_pdf_path and Path(task.output_pdf_path).exists()),
+        "formcall": _formcall_view(task),  # phone form session (app/formcall); None for other tasks
     }
+
+
+def _formcall_view(task: Task) -> Optional[dict]:
+    from app.formcall.dashboard import view
+
+    return view(task)
 
 
 @router.get("/tasks/{task_id}")

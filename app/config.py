@@ -40,6 +40,19 @@ class Settings(BaseSettings):
     twilio_validate_signatures: bool = True
     # Record every call (both sides) for demo backup footage; the greeting announces it.
     record_calls: bool = Field(False, alias="FORMLINE_RECORD_CALLS")
+    # Speech recognition detects English/Spanish on its own instead of using the profile's language.
+    voice_autodetect: bool = Field(True, alias="FORMLINE_VOICE_AUTODETECT")
+
+    # Phone form filling (app/formcall). False = the original form flow in app/engines/form_engine.py.
+    phone_forms: bool = Field(True, alias="FORMLINE_PHONE_FORMS")
+    # Email receipts: "outbox" writes .eml files to data/outbox (nothing leaves the laptop); "smtp" sends.
+    email_provider: str = Field("outbox", alias="FORMLINE_EMAIL_PROVIDER")
+    email_from: str = Field("Formline <receipts@formline.local>", alias="FORMLINE_EMAIL_FROM")
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
 
     public_base_url: str = "http://localhost:8000"
     database_url: str = f"sqlite:///{ROOT_DIR / 'data' / 'formline.db'}"

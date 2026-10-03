@@ -237,9 +237,10 @@ function renderTask(changed) {
       <span>${fmtDuration(t.comparison.this_s)} this time vs. ${fmtDuration(t.comparison.first_s)} for their first form</span>
     </div>` : ""}
     ${verify}
+    ${t.formcall ? phoneSession(t.formcall) : ""}
     ${groups.map((g) => `
       <div class="group-title">${esc(g.name)}</div>
-      <div class="fields">${g.fields.map((f) => fieldRow(f, changed.has(f.id))).join("")}</div>`).join("")}
+      <div class="fields">${g.fields.map((f) => fieldRow(f, changed.has(f.id), t.formcall)).join("")}</div>`).join("")}
   `;
   // Keep the action on screen: scroll to the field being asked, or the one that just changed,
   // only when that changes (so a viewer scrolling around isn't yanked back every poll).
@@ -249,7 +250,54 @@ function renderTask(changed) {
   state.lastFocus = key || state.lastFocus;
 }
 
-function fieldRow(f, flash) {
+// Phone form session (app/formcall): state, language, what Formline is waiting for, notices, receipt.
+const PHONE_STATE = {
+  in_progress: "Asking questions", ready_for_review: "Final review", awaiting_confirmation: "Waiting for the final yes",
+  prepared: "Prepared, not submitted", submitting: "Submitting", submitted: "Submitted (verified)",
+  submission_failed: "Submission failed", submission_unverified: "Submission not confirmed",
+  needs_attention: "Needs attention", paused: "Paused",
+};
+const NOTICE_STATUS = {
+  pending: "not yet presented", presented: "presented", read_exact: "exact wording read",
+  acknowledged: "acknowledged", disagreed: "caller disagrees", skipped: "skipped",
+};
+
+function phoneSession(fc) {
+  const notices = (fc.notices || []).map((n) => `
+    <li class="notice sev-${esc(n.severity)}">
+      <span class="chip sev-${esc(n.severity)}">${esc(n.severity)}${n.unusual ? " · unusual" : ""}</span>
+      <strong>${esc(n.category.replace(/_/g, " "))}</strong> — ${esc(n.explanation)}
+      <div class="quote">“${esc(n.quote)}” <small>(page ${esc(n.page ?? "?")})</small></div>
+      <small class="notice-status">${esc(NOTICE_STATUS[n.status] || n.status)}</small>
+    </li>`).join("");
+  const r = fc.receipt;
+  return `
+    <div class="phone-session">
+      <div class="ps-row">
+        <span class="chip ps-state">${esc(PHONE_STATE[fc.state] || fc.state)}</span>
+        <span>Language: <strong>${esc((fc.language || "en").toUpperCase())}</strong></span>
+        ${fc.current_question ? `<span>Asking: <strong>${esc(fc.current_question)}</strong></span>` : ""}
+        <span>Waiting for: ${esc(fc.waiting_for || "—")}</span>
+        <span>Final yes: <strong>${fc.approved ? "given" : "not yet"}</strong></span>
+      </div>
+      ${fc.unresolved && fc.unresolved.length ? `<div class="ps-unresolved">Still open: ${fc.unresolved.map(esc).join("; ")}</div>` : ""}
+      ${notices ? `<div class="group-title">Important information</div><ul class="notices">${notices}</ul>` : ""}
+      <div class="ps-row">Receipt: ${r ? `<strong>${esc(r.status)}</strong>${r.to ? ` to ${esc(r.to)}` : ""}${r.provider ? ` via ${esc(r.provider)}` : ""}${r.error ? ` (${esc(r.error)})` : ""}` : "not offered yet"}</div>
+    </div>`;
+}
+
+function auditLine(a) {
+  if (!a) return "";
+  const bits = [`<span class="chip ver-${esc(a.verification)}">${esc(a.verification.replace("_", " "))}</span>`,
+                `<span class="chip prov">${esc(a.provenance)}${a.translated ? " · translated" : ""}</span>`];
+  if (a.heard) bits.push(`<span>heard “${esc(a.heard)}”</span>`);
+  if (a.normalized) bits.push(`<span>understood ${esc(a.normalized)}</span>`);
+  if (a.form_value) bits.push(`<span>on form “${esc(a.form_value)}”</span>`);
+  if (a.history && a.history.length) bits.push(`<span>corrected (was ${esc(a.history[a.history.length - 1].value)})</span>`);
+  return `<div class="audit">${bits.join(" ")}</div>`;
+}
+
+function fieldRow(f, flash, fc) {
   const cls = ["field"];
   if (!f.applies) cls.push("na");
   if (f.answered) cls.push(`src-${f.source}`); else cls.push("pending");
@@ -264,6 +312,7 @@ function fieldRow(f, flash) {
       <span class="field-label">${esc(f.label)}${f.required ? "" : " <small>(optional)</small>"}</span>
       <span class="field-value">${f.answered ? esc(f.value || "—") : "…"}</span>
       ${chip}
+      ${fc && f.answered ? auditLine((fc.fields || {})[f.id]) : ""}
     </div>`;
 }
 

@@ -441,6 +441,16 @@ def forget_profile(profile_id: int) -> ForgetResult:
         for model in (BrowserTask, BrowserInstallation):
             for row in s.exec(select(model).where(model.profile_id == profile_id)).all():
                 s.delete(row)
+        # Phone form runs, the notices shown during them, and emailed receipts (with their PDFs).
+        from app.models import FormNotice, FormRun, Receipt
+
+        for row in s.exec(select(FormNotice).where(FormNotice.task_id.in_(task_ids))).all():
+            s.delete(row)
+        for row in s.exec(select(FormRun).where(FormRun.profile_id == profile_id)).all():
+            s.delete(row)
+        for row in s.exec(select(Receipt).where(Receipt.profile_id == profile_id)).all():
+            result.files += _remove_file(row.pdf_path)
+            s.delete(row)
         s.commit()
 
         # 3. Tasks, then documents (tasks reference documents), with their files.

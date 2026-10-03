@@ -148,9 +148,13 @@ async def inbound_call(request: Request) -> Response:
         lang = await run_in_threadpool(caller_language, params.get("From", ""))
         resp = VoiceResponse()
         connect = resp.connect(action=get_settings().public_base_url.rstrip("/") + "/twilio/voice/status")
+        extra = {}
+        if get_settings().voice_autodetect:
+            # Recognize English or Spanish whatever the profile says; each prompt reports which it heard.
+            extra = {"transcription_language": "multi", "speech_model": "nova-3-general"}
         relay = connect.conversation_relay(url=relay_url(issue_token()), welcome_greeting=greeting(lang),
                                            language=LANG_TAGS[lang], dtmf_detection=True,
-                                           interruptible="any")
+                                           interruptible="any", **extra)
         for tag in LANG_TAGS.values():
             relay.language(code=tag)
         return _xml(resp)
@@ -228,7 +232,7 @@ class VoiceCall:
                     self._prompt_at = time.perf_counter()
                     await self.controller.on_utterance(msg["voicePrompt"])  # returns at once; work continues
                 else:
-                    await self.turn(msg["voicePrompt"])
+                    await self.turn(msg["voicePrompt"], hint=msg.get("lang"))
         elif kind == "dtmf":
             await self.digit(str(msg.get("digit", "")))
         elif kind == "interrupt":
@@ -274,13 +278,13 @@ class VoiceCall:
         await self.send({"type": "end"})
         self.ended = True
 
-    async def turn(self, text: str, *, timed: bool = True) -> None:
+    async def turn(self, text: str, *, timed: bool = True, hint: Optional[str] = None) -> None:
         async with self._turn_lock:
             if self.ended:
                 return
             started = time.perf_counter()
             brain = asyncio.ensure_future(run_in_threadpool(
-                handle_turn, TurnRequest(phone=self.phone, channel="voice", text=text)))
+                handle_turn, TurnRequest(phone=self.phone, channel="voice", text=text, language_hint=hint)))
             result = await self._await_brain(brain)
             await self.speak(result)
             if timed:
@@ -315,7 +319,10 @@ class VoiceCall:
     async def speak(self, result: TurnResult) -> None:
         if result.language in LANG_TAGS and result.language != self.lang:
             tag = LANG_TAGS[result.language]
-            await self.send({"type": "language", "ttsLanguage": tag, "transcriptionLanguage": tag})
+            switch = {"type": "language", "ttsLanguage": tag}
+            if not get_settings().voice_autodetect:  # with "multi" recognition, keep listening for both
+                switch["transcriptionLanguage"] = tag
+            await self.send(switch)
             self.lang = result.language
         if result.reply.strip():
             await self.send({"type": "text", "token": result.reply, "last": True})
