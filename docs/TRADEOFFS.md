@@ -340,3 +340,11 @@ Format: decision, alternatives considered, why.
 
 **A guard test fails if any source file contains a stray control character.**
 - Why: a shell heredoc turned `\b` into a literal backspace three times; once it silently broke the question detector, and an older one had been breaking part of the "Loading…" detector unnoticed.
+
+**The browser agent remembers people through the existing profile (`ProfileFact`), not a new store.**
+- Alternatives: a separate agent-memory table; a free-form notes blob per person; an external database.
+- Why: one memory per person, shared with the form assistant, already on the dashboard's Memory tab, already erased by "forget me", with freshness built in. Facts reach the model only after the PIN (the agent doesn't exist before it); sensitive facts are never shown; stale ones are marked so the agent checks them first.
+
+**The model can only *propose* remembering; code checks the key and the value's shape, and the caller says yes before anything is saved.**
+- Why: the LLM never decides on its own what gets saved. Proposals are limited to canonical profile paths (never SSN digits), converted to the stored shape (dates to ISO, amounts to numbers), read back in plain words ("your date of birth, March 14, 1988"), and offered after a result or an answer so they don't interrupt the task. Repeating something already saved just re-confirms it, with no question. Saved facts are tagged `conversation` / `browser_task:<id>`; the activity log names the fields, never the values.
+- Limit: if a call ends before a result or an answer, unsaved proposals are dropped.

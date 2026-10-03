@@ -25,6 +25,7 @@ from typing import Awaitable, Callable, Optional, Protocol
 
 from fastapi.concurrency import run_in_threadpool
 
+from app.agent import memory as agent_memory
 from app.agent import store
 from app.agent.decision import Decision, Step
 from app.agent.policy import classify_reply, is_consequential, is_stop, page_fingerprint, validate_step
@@ -59,6 +60,8 @@ SAY = {
         "long": "This is taking a while. Should I keep going?",
         "confirm_q": "Should I go ahead?",
         "press": "I'm ready to press {label}. Should I go ahead?",
+        "remembered": "Got it. I'll remember that for next time.",
+        "not_remembered": "Okay, I won't save it.",
     },
     "es": {
         "filler": "Un momento.",
@@ -72,6 +75,8 @@ SAY = {
         "long": "Esto está tardando. ¿Sigo intentando?",
         "confirm_q": "¿Lo hago?",
         "press": "Estoy listo para presionar {label}. ¿Lo hago?",
+        "remembered": "Listo. Lo recordaré para la próxima vez.",
+        "not_remembered": "De acuerdo, no lo guardaré.",
     },
 }
 
@@ -218,6 +223,7 @@ class BrowserAgent:
         self._fresh_turn = False  # the next decision is the first since the caller spoke
         self._loop_task: Optional[asyncio.Task] = None
         self._stopping = False
+        self._offers: list[agent_memory.Proposal] = []  # details the caller gave, waiting to be offered for saving
 
     # ------------------------------------------------------------ public
 
@@ -243,6 +249,8 @@ class BrowserAgent:
             except Exception:
                 pass
         self.transcript.append(("caller", text))
+        if self.pending and self.pending.get("type") == "remember" and await self._resolve_memory_offer(text):
+            return
         if self.pending and self.pending.get("type") == "confirm":
             await self._resolve_confirmation(text)
             return
@@ -395,6 +403,7 @@ class BrowserAgent:
                                  error="Its quote couldn't be confirmed on the page" if problem else None)
                 self.last_outcome = "answer"
                 await self._say(decision.say)
+                await self._offer_memory()
                 return
 
             if kind == "blocked":
@@ -414,6 +423,7 @@ class BrowserAgent:
                               steps=self.steps, model_calls=self.model_calls)
                     await self.browser.overlay(None)
                     await self._say(decision.say)
+                    await self._offer_memory()
                     return
                 store.add_action(self.task_id, "unverified", element_label=decision.evidence, ok=False, error=why)
                 self.notes.append(why)
@@ -532,8 +542,11 @@ class BrowserAgent:
         # provider can cache.
         shown = page_text(page, previous=self._last_seen)
         self._last_seen = page
+        known = await run_in_threadpool(agent_memory.recall, self.profile_id)
         user = (f"CURRENT PAGE:\n{shown}\nEND OF PAGE\n\n"
-                f"Caller's goal: {self.goal}\n\nConversation so far (most recent last):\n{convo}\n\n"
+                f"Caller's goal: {self.goal}\n\n"
+                f"What you remember about the caller (from earlier conversations):\n{known or '(nothing saved yet)'}\n\n"
+                f"Conversation so far (most recent last):\n{convo}\n\n"
                 f"Steps you have taken in the browser:\n{steps}\n\nNotes for this turn:\n{notes}")
         content: object = user
         images: list[str] = list(page.document.images) if page.document else []
@@ -562,6 +575,7 @@ class BrowserAgent:
             decision = await self.decide(system_prompt(self.language), [{"role": "user", "content": content}])
         ms = round((time.perf_counter() - started) * 1000)
         decision = self._tidy(decision, page)
+        await self._collect_memory(decision)
         _trace(user, decision, ms)
         self.model_calls += 1
         self._persist(model_calls=self.model_calls)
@@ -569,6 +583,50 @@ class BrowserAgent:
         log.info("agent %s in %sms: %s | %s", decision.kind, ms,
                  [(s.action, s.element_id, s.value) for s in decision.steps], decision.reason)
         return decision
+
+    # ------------------------------------------------------------ memory
+
+    async def _collect_memory(self, decision: Decision) -> None:
+        """Keep the details the model proposes remembering, once code has checked them. Repeating what's already
+        saved just re-confirms it; anything new or different waits to be offered to the caller."""
+        for item in decision.remember or []:
+            proposal = agent_memory.check(item.key, item.value, language=self.language)
+            if isinstance(proposal, str):
+                self.notes.append(f"Not remembered: {proposal}")
+                continue
+            if await run_in_threadpool(agent_memory.already_known, self.profile_id, proposal):
+                await run_in_threadpool(agent_memory.refresh, self.profile_id, proposal)
+                continue
+            self._offers = [p for p in self._offers if p.path != proposal.path] + [proposal]
+
+    async def _offer_memory(self) -> None:
+        """After a result or an answer, ask before saving anything new the caller told us."""
+        if not self._offers:
+            return
+        offers, self._offers = self._offers, []
+        self.pending = {"type": "remember", "proposals": offers}
+        if self.task_id:
+            store.add_action(self.task_id, "remember_offer", element_label=", ".join(p.path for p in offers),
+                             reason="Caller shared details worth reusing")
+        await self._say(agent_memory.offer_text(offers, self.language))
+
+    async def _resolve_memory_offer(self, text: str) -> bool:
+        """The caller's reply to "Would you like me to remember...?". False if they moved on to something else:
+        nothing is saved and their words are handled as a new request."""
+        offers = (self.pending or {}).get("proposals", [])
+        self.pending = None
+        verdict = classify_reply(text)
+        if verdict == "other":
+            return False
+        saved = 0
+        if verdict == "yes":
+            saved = await run_in_threadpool(agent_memory.save, self.profile_id, offers, task_id=self.task_id)
+        if self.task_id:
+            store.add_action(self.task_id, "remembered" if saved else "not_remembered",
+                             element_label=", ".join(p.path for p in offers),
+                             reason="Caller said yes" if verdict == "yes" else "Caller said no")
+        await self._say(self._t("remembered" if saved else "not_remembered"))
+        return True
 
     async def _screen(self, page: PageState) -> Optional[str]:
         """A screenshot of what the person sees: for the first look after they ask something (so questions about
