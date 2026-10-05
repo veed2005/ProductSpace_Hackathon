@@ -65,6 +65,11 @@ def validate_step(step: Step, page: PageState) -> Optional[str]:
     elif step.action == "scroll":
         if (step.value or "down").lower() not in SCROLL_VALUES:
             return "scroll value must be up, down, top or bottom"
+    elif step.action == "new_tab":
+        if not (step.value or "").strip():
+            return "new_tab needs the words to search the web for in value (a site's name, or what the caller wants)"
+        if len(step.value) > 200:
+            return "new_tab search words are too long"
     elif step.action == "switch_tab":
         if not TAB_TARGET.match((step.value or "").strip()):
             return 'switch_tab value must be "previous" or a tab handle from the tab list, like T2'

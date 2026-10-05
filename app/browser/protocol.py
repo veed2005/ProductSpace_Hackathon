@@ -22,7 +22,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 ActionName = Literal["search", "click", "type", "clear", "select", "check", "uncheck", "press_enter", "scroll",
-                     "go_back", "navigate", "focus", "switch_tab"]
+                     "go_back", "navigate", "focus", "switch_tab", "new_tab"]
 ACTIONS: tuple[str, ...] = ActionName.__args__  # type: ignore[attr-defined]
 
 # Roles a control can have in a snapshot. "text", "heading", "alert" and "dialog" carry content only.

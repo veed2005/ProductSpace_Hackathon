@@ -562,7 +562,8 @@ class BrowserAgent:
                     # The agent changed what the person sees, so it says where it is now.
                     await self._say(await self._t("tab", name=site_name(await self._page())))
                     break
-                if result.page_changed and step.action in ("click", "press_enter", "go_back", "navigate", "search"):
+                if result.page_changed and step.action in ("click", "press_enter", "go_back", "navigate", "search",
+                                                           "new_tab"):
                     break  # look at the new page before doing more
             if errors >= MAX_ERRORS:
                 break
@@ -762,11 +763,13 @@ class BrowserAgent:
         self._done_steps.append((_page_key(page), step.action, key_what.strip().lower()))
         if step.action == "search":  # what the search routine did, in its own words
             label = result.detail or (f"search box {el.label!r}" if el else "the site search")
+        if step.action == "new_tab":
+            label = "a new tab with a web search"
         if step.action == "switch_tab":  # "moved from Riverbend to Maple County Public Library"
             label = result.detail if result.success else f"tab {step.value}"
         ms = round((time.perf_counter() - started) * 1000)
         shown = None
-        if step.action in ("type", "select", "navigate", "scroll", "search") and step.value:
+        if step.action in ("type", "select", "navigate", "scroll", "search", "new_tab") and step.value:
             shown = mask(step.value)[:200]
         store.add_action(self.task_id, step.action, element_label=label, value=shown, reason=reason,
                          ok=result.success, error=result.error, url_before=result.url_before,
@@ -778,6 +781,8 @@ class BrowserAgent:
         typed = f" = {shown!r}" if shown else ""
         if step.action == "search":
             self.history.append(f"search for {shown!r} -> {outcome}: {result.detail or 'no details'}")
+        elif step.action == "new_tab":
+            self.history.append(f"new_tab searching the web for {shown!r} -> {outcome}{changed}")
         elif step.action == "switch_tab":
             self.history.append(f"switch_tab {step.value} -> {outcome}: {result.detail or 'no details'}")
         else:
