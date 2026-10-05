@@ -1,4 +1,4 @@
-"""Form library and documents for the dashboard. Owner: Lane D.
+"""Form library and documents for the dashboard.
 
 GET  /api/forms                     library list with review status and memory coverage
 GET  /api/forms/{form_id}           schema + meta + problems found by checking it against the PDF

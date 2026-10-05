@@ -1,4 +1,4 @@
-"""Read AcroForm fields out of a PDF. Owner: Lane C.
+"""Read AcroForm fields out of a PDF.
 
 Shared by fill, verify, scripts/inspect_pdf.py and (later) ingestion. A "field" here is one
 logical form field: a radio group, or a text field repeated on several pages, is one PdfField

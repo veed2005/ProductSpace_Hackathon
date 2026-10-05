@@ -1,4 +1,4 @@
-"""Twilio voice + ConversationRelay. Owner: Lane B.
+"""Twilio voice + ConversationRelay.
 
 POST /twilio/voice         (configure on the Twilio number) -> TwiML that connects ConversationRelay
 WS   /twilio/voice/relay   ConversationRelay streams transcribed speech here; we reply with text

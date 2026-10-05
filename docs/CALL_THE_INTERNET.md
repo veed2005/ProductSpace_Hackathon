@@ -53,7 +53,7 @@ Incoming calls work as soon as the webhooks are set. Anything Formline *sends* n
 
 Git carries the code and the docs. These stay behind:
 
-1. **Tools:** [uv](https://docs.astral.sh/uv/) (Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`), Git (on Windows, Git Bash runs `sh scripts/setup.sh`), Chrome, ngrok, and the GitHub CLI. Run `gh auth login`: it opens PRs and tells Claude Code which lane you own. If Claude Code still says the lane is unknown, run `python scripts/lane.py set <A|B|C|D>`.
+1. **Tools:** [uv](https://docs.astral.sh/uv/) (Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`), Git (on Windows, Git Bash runs `sh scripts/setup.sh`), Chrome, ngrok, and the GitHub CLI. Run `gh auth login` so you can open PRs.
 2. **Set up the clone:** `sh scripts/setup.sh`, plus `uv run playwright install chromium` if you'll run the browser tests.
 3. **`.env` is not in git.** Copy it over privately (never by chat or email), or fill in a fresh copy of `.env.example`.
 4. **ngrok's authtoken** lives in ngrok's own config: `ngrok config add-authtoken <token>`, from the account that owns the reserved domain. Stop ngrok on the old computer first. With the same domain, the Twilio webhooks don't change.

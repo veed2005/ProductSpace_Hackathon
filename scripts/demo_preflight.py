@@ -1,4 +1,4 @@
-"""Is everything ready for the live demo? Owner: Lane D.
+"""Is everything ready for the live demo?
 
   uv run python scripts/demo_preflight.py           # run with the server and ngrok already up
   uv run python scripts/demo_preflight.py --local   # skip Twilio/ngrok checks (simulator-only rehearsal)
@@ -34,7 +34,7 @@ def check_env() -> list[Check]:
     out = [Check("LLM API key in .env (Anthropic or OpenAI)", bool(s.anthropic_api_key or s.openai_api_key),
                  fix="Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env")]
     twilio = bool(s.twilio_account_sid and s.twilio_auth_token and s.twilio_phone_number)
-    out.append(Check("Twilio credentials in .env", twilio, fix="Set TWILIO_ACCOUNT_SID / _AUTH_TOKEN / _PHONE_NUMBER (ask Lane B)"))
+    out.append(Check("Twilio credentials in .env", twilio, fix="Set TWILIO_ACCOUNT_SID / _AUTH_TOKEN / _PHONE_NUMBER"))
     out.append(Check("PUBLIC_BASE_URL is an https ngrok URL",
                      s.public_base_url.startswith("https://") and "example" not in s.public_base_url,
                      s.public_base_url, "Start ngrok and put its https URL in PUBLIC_BASE_URL, then restart the server"))
@@ -117,7 +117,7 @@ def check_forms() -> list[Check]:
     for need, words in (("SNAP application", ("snap", "food stamps")), ("Medicaid renewal", ("medicaid",))):
         match = next((m for m in forms if any(w in " ".join([m.form_id, m.name, *m.aliases]).lower() for w in words)), None)
         if match is None:
-            out.append(Check(f"{need} form in the library", False, fix="Lane C: add it under forms/ (Phase C2/C4)"))
+            out.append(Check(f"{need} form in the library", False, fix="Add it under forms/"))
             continue
         schema = form_library.load_schema(match.form_id)
         problems = schema_problems(match.form_id)

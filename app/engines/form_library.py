@@ -1,4 +1,4 @@
-"""Form library: forms/<form_id>/{form.pdf, schema.json, meta.json}. Owner: Lane C."""
+"""Form library: forms/<form_id>/{form.pdf, schema.json, meta.json}."""
 
 import json
 import logging

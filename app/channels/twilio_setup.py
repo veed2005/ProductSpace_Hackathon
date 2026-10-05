@@ -1,4 +1,4 @@
-"""Point the Twilio number's webhooks at this server. Owner: Lane B.
+"""Point the Twilio number's webhooks at this server.
 
 Rerun whenever the ngrok URL changes:
 

@@ -1,4 +1,4 @@
-"""JSON API behind the dashboard. Owner: Lane D.
+"""JSON API behind the dashboard.
 
 GET /api/people                    one entry per phone number, most recent first
 GET /api/phones/{phone}/messages   interleaved voice + SMS transcript for a phone

@@ -1,4 +1,4 @@
-"""Section 12 metrics, computed from the events table. Owner: Lane D.
+"""Section 12 metrics, computed from the events table.
 
 Event names and payloads are the contract in docs/TEAM.md ("Metrics events"). Every metric
 degrades to None when its events haven't been logged yet, so the panel works from day one.

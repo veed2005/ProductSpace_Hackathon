@@ -1,6 +1,6 @@
-"""handle_turn: the single entry point both channels call. Owner: Lane A.
+"""handle_turn: the single entry point both channels call.
 
-Contract (do not change the signature without telling Lane B):
+Contract (both channels depend on this signature; do not change it without updating them):
     handle_turn(TurnRequest) -> TurnResult
 """
 

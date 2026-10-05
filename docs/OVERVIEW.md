@@ -63,34 +63,21 @@ Other standing rules:
 
 ---
 
-## 4. Team structure and the rules a coding agent must follow
+## 4. Team rules a coding agent must follow
 
-The code is split into **four lanes**, each owned by one person. Lanes talk only through contracts (`app/contracts.py`) and a fixed list of cross-lane functions (`docs/TEAM.md`).
-
-| Lane | Owner (GitHub) | Owns |
-|---|---|---|
-| **A: Conversation brain** | aryavsaigal | `app/core/turn.py`, `app/core/router.py`, `app/core/style.py`, `app/core/referrals*`, `app/engines/form_engine.py`, `app/llm/prompts/conversation*`, `scripts/simulate.py`, `tests/test_brain_*.py` |
-| **B: Channels + identity** | **Edoubek1024 (the user writing this prompt)** | `app/channels/*`, `app/core/identity.py`, `app/reminders.py`, `tests/test_channels_*`, `tests/test_identity_*`, `tests/test_reminders_*`, plus the Twilio console, ngrok, and the shared `.env` values |
-| **C: Forms, PDFs, documents** | luisNava111 | `app/engines/form_library.py`, `app/engines/document_engine.py`, `app/engines/ingest.py`, `app/pdf/*`, `forms/*`, `scripts/ingest_form.py`, `scripts/inspect_pdf.py`, `scripts/make_sample_form.py`, `app/llm/prompts/document*`, `app/llm/prompts/ingest*`, `tests/test_forms_*`, `tests/test_docs_*` |
-| **D: Memory, dashboard, metrics, demo** | veed2005 | `app/memory/*`, `app/engines/status_engine.py`, `app/dashboard/*`, `app/metrics.py`, `scripts/seed_demo.py`, `scripts/reset_demo.py`, `scripts/demo_preflight.py`, `scripts/make_demo_letter.py`, `docs/PRIVACY.md`, `docs/DEMO_SCRIPT.md`, `tests/test_memory_*`, `tests/test_dashboard_*` |
+Modules talk through contracts (`app/contracts.py`) and a fixed list of functions (`docs/TEAM.md`).
 
 **Shared files** (small, additive changes only, announced to the team first): `app/contracts.py`, `app/models.py`, `app/events.py`, `app/llm/client.py`, `app/config.py`, `app/main.py`, `pyproject.toml`, `uv.lock`, `.env.example`.
 
 **Rules in `CLAUDE.md`** that Claude Code follows by default:
 
-- A session-start hook (`scripts/lane.py session-start`) identifies the user's lane. For this user it is **Lane B**.
-- Claude **edits only files owned by the user's lane**. If another lane's file needs a change, it tells the user what to ask that owner for, rather than editing it.
-- Ownership is checked with `python3 scripts/lane.py owner <path>`, and `python3 scripts/lane.py check` lists out-of-lane files on the current branch.
-- Each lane has a phased plan in `docs/lanes/LANE_<X>.md`. "Start Phase X1" means do that phase only, then stop and summarize.
 - Design decisions are appended to the end of `docs/TRADEOFFS.md` (format: decision, alternatives, why).
 - **Git:**
   - Never commit or push to `main`; a pre-push hook blocks it.
-  - Branch from fresh `main` as `<lane>/<phase>-<what>` (e.g. `b/b3-pin`).
+  - Branch from fresh `main` as `<area>/<what>`.
   - Keep PRs small. `uv run pytest` must pass. Open PRs with `gh pr create --fill`.
-  - CI runs pytest on every PR, and CODEOWNERS requests review when a PR touches another lane's files.
-- Tests go in the lane's own `tests/test_<area>_*.py`. The LLM is mocked by monkeypatching `app.llm.client.structured` / `text`. Tests that hit the real API are marked `@pytest.mark.live` and are **excluded by default and in CI**.
-
-**If the user wants Claude to work outside Lane B** (for example, to fix Lane A's brain), the prompt must say so explicitly, because by default Claude will refuse to edit other lanes' files. The prompt should also say whether the other owners have agreed, and whether the changes should be split into one PR per lane.
+  - CI runs pytest on every PR.
+- Tests go in `tests/test_<area>_*.py`. The LLM is mocked by monkeypatching `app.llm.client.structured` / `text`. Tests that hit the real API are marked `@pytest.mark.live` and are **excluded by default and in CI**.
 
 ---
 
@@ -100,34 +87,34 @@ The code is split into **four lanes**, each owned by one person. Lanes talk only
 app/
   main.py              FastAPI app; registers routers; startup: init_db, sync_forms, start reminder scheduler
   config.py            Settings from .env (models, Twilio creds, PUBLIC_BASE_URL, data paths, flags)
-  contracts.py         Cross-lane Pydantic shapes (TurnRequest/TurnResult, FormSchema, DocumentExplanation, ...)
+  contracts.py         Cross-module Pydantic shapes (TurnRequest/TurnResult, FormSchema, DocumentExplanation, ...)
   models.py            SQLModel tables
   db.py                Engine, init_db, session_scope
   events.py            log_message / log_activity / log_event / publish (dashboard SSE); never raises
   metrics.py           Section 12 metrics computed from the events table
   core/
-    turn.py            handle_turn: the brain, a state machine (Lane A)
-    router.py          Intent classification: keywords first, then LLM (Lane A)
-    style.py           Per-channel style rules for LLM-phrased replies (Lane A)
-    referrals.py/.json Legal-aid referral line for high-stakes letters (Lane A)
-    identity.py        Sessions, profiles, PIN hashing/lockout, shared phones (Lane B)
+    turn.py            handle_turn: the brain, a state machine
+    router.py          Intent classification: keywords first, then LLM
+    style.py           Per-channel style rules for LLM-phrased replies
+    referrals.py/.json Legal-aid referral line for high-stakes letters
+    identity.py        Sessions, profiles, PIN hashing/lockout, shared phones
   engines/
-    form_engine.py     Generic schema-driven form conversation, prefill, read-back, fill+verify (Lane A)
-    form_library.py    Load forms/<id>/ schema+meta, match_form by alias then LLM (Lane C)
-    document_engine.py Explain letter photos with the vision model (Lane C)
-    ingest.py          PDF -> draft schema.json via LLM, with validation and repair (Lane C)
-    status_engine.py   "What have you done for me?" from the activity log (Lane D)
-  memory/profile.py    Canonical profile facts with source and freshness; path API; forget_profile (Lane D)
-  pdf/                 fields.py (inspect), fill.py, verify.py, format.py (pdf_value) (Lane C)
+    form_engine.py     Generic schema-driven form conversation, prefill, read-back, fill+verify
+    form_library.py    Load forms/<id>/ schema+meta, match_form by alias then LLM
+    document_engine.py Explain letter photos with the vision model
+    ingest.py          PDF -> draft schema.json via LLM, with validation and repair
+    status_engine.py   "What have you done for me?" from the activity log
+  memory/profile.py    Canonical profile facts with source and freshness; path API; forget_profile
+  pdf/                 fields.py (inspect), fill.py, verify.py, format.py (pdf_value)
   llm/client.py        structured(), text(), image_block(), model selection, refusal fallback (shared)
   llm/prompts/         document.py, ingest.py
   channels/
-    messaging.py       POST /twilio/messaging: SMS/MMS webhook (Lane B)
-    voice.py           POST /twilio/voice + WS /twilio/voice/relay: ConversationRelay (Lane B)
-    outbound.py        send_sms (logs only when Twilio isn't configured) (Lane B)
-    twilio_setup.py    CLI that points the Twilio number's webhooks at the current ngrok URL (Lane B)
-  reminders.py         create_reminder, send_now, APScheduler job (Lane B)
-  dashboard/           routes.py (page, static, SSE), api.py, control_api.py, forms_api.py, demo.py, static/ (Lane D)
+    messaging.py       POST /twilio/messaging: SMS/MMS webhook
+    voice.py           POST /twilio/voice + WS /twilio/voice/relay: ConversationRelay
+    outbound.py        send_sms (logs only when Twilio isn't configured)
+    twilio_setup.py    CLI that points the Twilio number's webhooks at the current ngrok URL
+  reminders.py         create_reminder, send_now, APScheduler job
+  dashboard/           routes.py (page, static, SSE), api.py, control_api.py, forms_api.py, demo.py, static/
 forms/<form_id>/       form.pdf, schema.json, meta.json
   il_snap/             Illinois SNAP application IL444-0683 (27 hand-picked fields of 367)
   il_medicaid/         Illinois HFS 2378H medical benefits application (31 fields), standing in for "Medicaid renewal"
@@ -135,11 +122,11 @@ forms/<form_id>/       form.pdf, schema.json, meta.json
   sample_benefits/     Small generated placeholder form (8 fields)
   _new_form_demo/      IL444-1893 SNAP Redetermination PDF kept for the "upload a new form live" finale (no meta.json, so it isn't loaded)
 scripts/               simulate.py, seed_demo.py, reset_demo.py, demo_preflight.py, make_demo_letter.py,
-                       ingest_form.py, inspect_pdf.py, make_sample_form.py, lane.py, setup.sh, demo_replay.py
+                       ingest_form.py, inspect_pdf.py, make_sample_form.py, setup.sh, demo_replay.py
 tests/                 283 offline tests + 6 live; fixtures/documents/ holds fake letters (Medicaid renewal,
                        medical bill, eviction notice, blurry photo, prompt-injection letter)
-docs/                  PROJECT_BRIEF.md (full spec), PLAN.md, TEAM.md, TRADEOFFS.md, PRIVACY.md,
-                       DEMO_SCRIPT.md, lanes/LANE_A-D.md, REVIEW_DEMO_PATH.md, OVERVIEW.md (this file)
+docs/                  PROJECT_BRIEF.md (full spec), TEAM.md, TRADEOFFS.md, PRIVACY.md,
+                       DEMO_SCRIPT.md, REVIEW_DEMO_PATH.md, OVERVIEW.md (this file)
 ```
 
 ---
@@ -160,7 +147,7 @@ docs/                  PROJECT_BRIEF.md (full spec), PLAN.md, TEAM.md, TRADEOFFS
 | `Activity` | Human-readable log ("Completed Illinois SNAP Application"). Powers run-backs and the dashboard. |
 | `Event` | Machine-readable metrics events (`turn`, `form_started`, `field_answered`, `readback_correction`, `form_completed`, `verification`, `document_explained`, `channel_switch`, `voice_latency`, `reminder_sent`, ...). |
 
-**Canonical memory keys** (`app/memory/profile.py`, Lane D) use paths into a small set of top-level facts:
+**Canonical memory keys** (`app/memory/profile.py`) use paths into a small set of top-level facts:
 
 - `name` {first, middle, last}, with `full_name` as a virtual key over it
 - `date_of_birth`, `phone`, `email`, `preferred_language`
@@ -230,7 +217,7 @@ State machine (stored in `Session.state` + `Session.pending`):
 
 ## 9. State of each area
 
-### Lane B: channels + identity (the user's lane). Phases B1–B6 all merged; in good shape.
+### Channels + identity. All merged; in good shape.
 
 - **SMS/MMS webhook** (`/twilio/messaging`):
   - Validates `X-Twilio-Signature`, rebuilding the URL from `PUBLIC_BASE_URL` because ngrok rewrites the host. Can be turned off for local testing.
@@ -258,9 +245,9 @@ State machine (stored in `Session.state` + `Session.pending`):
   - Failures are marked `failed` and not retried. SSN-shaped text is scrubbed.
   - An APScheduler job runs every minute, and there's a CLI.
 - **`twilio_setup.py`:** reads the live ngrok URL, repoints both webhooks, and reports missing capabilities and unverified trial phones.
-- **Not yet done by Lane B:** real-phone verification on this machine. This Windows machine has no `uv` installed and no `.env`, so the project hasn't been run here with real credentials.
+- **Not yet done:** real-phone verification on this machine. This Windows machine has no `uv` installed and no `.env`, so the project hasn't been run here with real credentials.
 
-### Lane C: forms, PDFs, documents. C1–C6 merged; strong.
+### Forms, PDFs, documents. All merged; strong.
 
 - `fill_pdf`:
   - Maps checkbox/radio values to each widget's real on-state, and writes raw PDF names.
@@ -281,7 +268,7 @@ State machine (stored in `Session.state` + `Session.pending`):
   - Prompt size was cut 31–64%; model time is still unmeasured.
 - `match_form`: whole-word, accent-insensitive aliases (longest first), with a fast-model fallback.
 
-### Lane D: memory, dashboard, metrics, demo. D1–D6 merged; strong.
+### Memory, dashboard, metrics, demo. All merged; strong.
 
 - **Memory:** path-based API (`get_value` / `set_value` / `confirm_fact` / `get_facts`), per-fact freshness, and `forget_profile` with a full cascade (files included).
 - **Dashboard** at `/dashboard`, only reachable from localhost (ngrok requests are rejected):
@@ -295,7 +282,7 @@ State machine (stored in `Session.state` + `Session.pending`):
   - Rosa: the live new user in the demo.
 - **Docs:** `DEMO_SCRIPT.md` (5-step on-stage flow with Rosa's exact Spanish lines, cast, backup plans B/C/D), `PRIVACY.md`, a pre-flight check script, and a demo letter generator.
 
-### Lane A: conversation brain. Merged in two large PRs (#22, #23); the weak point.
+### Conversation brain. Merged in two large PRs (#22, #23); the weak point.
 
 The structure above exists and the unit tests pass. However, it doesn't survive the actual demo script (see section 10).
 
@@ -326,7 +313,7 @@ The structure above exists and the unit tests pass. However, it doesn't survive 
    - In `class Deadline`, the field named `date` hides the `date` type, so pydantic reads the annotation as `Optional[None]`.
    - `llm.structured` sends that schema to Claude as constrained output, so every real deadline date comes back `null`.
    - Result: no reminder is ever offered, and the dashboard deadline countdown stays empty.
-   - A Lane A test works around it with `Deadline.model_construct`. The live test that would catch it never runs in CI.
+   - A brain test works around it with `Deadline.model_construct`. The live test that would catch it never runs in CI.
    - Fix: one line (`Optional[datetime.date]`).
 2. **The PIN is never checked again after setup.**
    - `turn.py` never calls `identity.verify_pin`, and `start_form` prefills from memory only within 30 minutes of PIN entry.
@@ -336,18 +323,18 @@ The structure above exists and the unit tests pass. However, it doesn't survive 
 5. **Related-form path skips the memory confirmation.** `_document_followup_flow` replies with the first question while the session is in `form_memory_confirm`.
 6. **PDF value errors.**
    - Pay normalized to a monthly amount is printed next to pay frequency "weekly".
-   - Phones print as `+12175550104`, because the brain's `_pdf_values` doesn't use Lane C's `pdf_value()`.
+   - Phones print as `+12175550104`, because the brain's `_pdf_values` doesn't use `pdf_value()` from `app/pdf/format.py`.
 7. **Smaller problems:**
    - `display_name` is never set from the applicant's name, so the greeting says "Hi friend!" and the dashboard shows "Unnamed".
    - `classify_intent` runs on every turn, even mid-form where the result is ignored, adding an LLM call to every voice turn.
    - The receipt doesn't say how many answers came from memory or what's still missing.
    - Read-back is one long message even on voice.
-   - The brain doesn't use Lane B's `verify_pin` / `select_profile` / `match_profile`, so choosing a person on a shared phone keeps the previous person's PIN verification.
+   - The brain doesn't use identity's `verify_pin` / `select_profile` / `match_profile`, so choosing a person on a shared phone keeps the previous person's PIN verification.
 
 ### Docs drift
 
 - The README "Build status" checklist is out of date.
-- `DEMO_SCRIPT.md` step 5 uploads a LIHEAP form, but Lane C chose IL444-1893.
+- `DEMO_SCRIPT.md` step 5 uploads a LIHEAP form, but the team chose IL444-1893.
 - The persona card's lines assume free-form Spanish the brain doesn't accept, and their order doesn't match the SNAP schema.
 
 ---
@@ -385,8 +372,6 @@ uv run python scripts/demo_replay.py           # replays the demo script; shows 
 uv run python scripts/demo_preflight.py        # checks ngrok/Twilio/keys/dev flags before a demo
 uv run python scripts/reset_demo.py --yes      # wipe and reseed
 uv run python -m app.channels.twilio_setup     # point Twilio webhooks at the current ngrok URL
-python3 scripts/lane.py owner <path>           # who owns a file
-python3 scripts/lane.py check                  # out-of-lane files on this branch
 ```
 
 Environment variables (`.env`, never committed):
@@ -403,7 +388,7 @@ Environment variables (`.env`, never committed):
 
 ## 13. Git state
 
-- `main` at `ff27a6c` (Lane A PR #23).
+- `main` at `ff27a6c` (PR #23).
 - The user's branch `b/review-demo-path` (local, not pushed) adds `docs/REVIEW_DEMO_PATH.md` and `scripts/demo_replay.py`. This file, `docs/OVERVIEW.md`, is uncommitted in the working tree.
 
 ---
@@ -413,7 +398,6 @@ Environment variables (`.env`, never committed):
 Claude Code will follow `CLAUDE.md` unless told otherwise. A good instruction prompt for this repo should state:
 
 - **Scope and authority:**
-  - Stay in Lane B only, or also edit other lanes' files (which ones, and whether the owners agreed)?
   - May it change shared files like `app/contracts.py`?
 - **Goal and priority order**, e.g. "make the DEMO_SCRIPT path pass end to end first", or "fix the PIN gate", or "rework the brain to use the LLM for parsing replies".
 - **Approach preferences:**

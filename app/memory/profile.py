@@ -1,4 +1,4 @@
-"""Canonical profile facts with provenance and freshness. Owner: Lane D.
+"""Canonical profile facts with provenance and freshness.
 
 Used by the form engine (prefill and write-back) and the document engine (case numbers, dates).
 
@@ -480,7 +480,7 @@ def forget_profile(profile_id: int) -> ForgetResult:
 
 
 def describe_keys() -> str:
-    """Canonical keys as plain text, e.g. for Lane C's schema-generation prompt."""
+    """Canonical keys as plain text, e.g. for the schema-generation prompt (app/engines/ingest.py)."""
     lines = []
     for key, spec in CANONICAL_KEYS.items():
         shape = (f"list of {{{', '.join(spec.fields)}}}" if spec.is_list and spec.fields

@@ -29,17 +29,17 @@ Format: decision, alternatives considered, why.
 
 ## Team setup
 
-**Four lanes with frozen contracts and working stubs, instead of splitting by phase.**
+**For the initial build: four parallel work areas with frozen contracts and working stubs, instead of splitting by phase.** (Since retired; see the last entry.)
 - Alternatives: everyone works through the phases in order; split by feature without interfaces.
-- Why: four people over ~30 hours. Phases depend on each other (the dashboard needs forms, forms need the brain), so splitting by phase leaves people blocked. Lanes own disjoint files, so merges rarely conflict. Every cross-lane call already has a stub that returns realistic data, so each lane can build and test on its own from hour one.
+- Why: four people over ~30 hours. Phases depend on each other (the dashboard needs forms, forms need the brain), so splitting by phase leaves people blocked. Each area owns disjoint files, so merges rarely conflict. Every call between areas already has a stub that returns realistic data, so each person can build and test on its own from hour one.
 
 **A hand-written placeholder form (`forms/sample_benefits`) with a generated fillable PDF.**
-- Why: lets Lanes A and C work on the full fill → verify → receipt path before the real PDFs are chosen and ingested.
+- Why: lets the brain and the PDF code work on the full fill → verify → receipt path before the real PDFs are chosen and ingested.
 
 **Server-side refusal fallback on for Opus/Sonnet 5.5 calls in `llm/client.py`.**
 - Why: if the strong model declines a document (for example a medical bill or court notice it misreads as sensitive), the API retries on another model in the same call instead of failing the person's request.
 
-## Lane D
+## Memory and dashboard
 
 **Profile keys are paths into a small set of top-level facts (`address.city`, `household_members[0].first_name`), and freshness is tracked per top-level fact.**
 - Alternatives: one flat fact per form-field-sized value (`address_city`, `member1_first_name`); freshness per sub-field.
@@ -63,13 +63,13 @@ Format: decision, alternatives considered, why.
 
 **Transcript hides inbound replies that are just 4 digits.**
 - Alternatives: a `sensitive` flag on each logged message, set by the brain.
-- Why: PINs and SSN last-4 are typed as bare digits, and this needs no cross-lane change. It misses longer messages like "my pin is 1234". A per-message flag from Lane A would be exact; we can add it later.
+- Why: PINs and SSN last-4 are typed as bare digits, and this needs no change to the brain. It misses longer messages like "my pin is 1234". A per-message flag from the brain would be exact; we can add it later.
 
 **"Forget me" hard-deletes the person's data but keeps anonymized metrics events.**
 - Alternatives: soft delete (a `deleted_at` flag); delete metrics events too.
 - Why: a deletion the person asked for should be real, including their filled PDFs and letter photos. Metrics events keep only numbers (durations, counts) once identity is stripped, so the aggregate metrics stay honest. On a shared phone, transcript lines that were never tied to anyone are kept while another profile remains, because they may belong to that person.
 
-## Lane B
+## Core build
 
 **Twilio webhooks are set by a script (`python -m app.channels.twilio_setup`), not by hand in the console.**
 - Alternatives: click through the console every time; a reserved ngrok domain only.
@@ -120,8 +120,8 @@ Format: decision, alternatives considered, why.
 
 **Gaps in the SNAP schema we accepted for now.**
 - The applicant's name is written once (page 1), not again in row 1 of the household table, because a schema field maps to one PDF field. An additive `also_pdf_fields` on `FormField` would fix it.
-- The household member's name box isn't mapped to memory: it wants "Last, First" in one box, and memory stores first/last separately with no formatter for a list item's full name. Asked Lane D for one.
-- The SSN box gets whatever Lane A writes for the last 4 (e.g. "XXX-XX-1234"); full SSNs are never collected.
+- The household member's name box isn't mapped to memory: it wants "Last, First" in one box, and memory stores first/last separately with no formatter for a list item's full name. Memory needs one.
+- The SSN box gets whatever the brain writes for the last 4 (e.g. "XXX-XX-1234"); full SSNs are never collected.
 
 **`match_form` matches whole words, longest alias first, accents ignored.**
 - Why: substring matching made "EBT" match "medical debt" and "SNAP" match "snapshot". Longest-first lets a specific alias ("school lunch") beat a generic one, and accent folding lets "almuerzo gratis" match "almuerzo gratís" typed on a phone.
@@ -140,7 +140,7 @@ Format: decision, alternatives considered, why.
 - Why: phone photos are often 4000 px and several MB, which is slower and costlier with no gain in readability, and MMS can deliver PDFs or formats the API doesn't take. Anything we can't open (e.g. HEIC) is reported in `unreadable_parts` so the brain can ask for a retake; with nothing readable, we skip the model call entirely.
 
 **`explain_document` raises on API failure instead of returning a low-confidence result.**
-- Why: a low-confidence result makes the brain say "the photo is blurry, please retake it", which is wrong when the real problem is the network. Lane A catches the error and apologizes instead.
+- Why: a low-confidence result makes the brain say "the photo is blurry, please retake it", which is wrong when the real problem is the network. The brain catches the error and apologizes instead.
 **Ingestion: the model picks and words the questions; code supplies and checks everything it can read from the PDF.**
 - Alternatives: one question per PDF field; let the model's draft stand.
 - Why: a 580-field form can't become 580 phone questions, so choosing 12-40 is the model's job. But field names, Yes/No states, max lengths and SSN handling are facts in the PDF, so code fills them in (Yes/No from the printed "Yes"/"No" labels, then the model's guess, then layout) and checks the draft (fields exist, no box used twice, conditions point backwards, memory keys are canonical). It retries once with the problems listed, then repairs what's left (drops invented boxes, renames duplicate ids, clears bad keys) so a stage upload never fails on a bad draft. Output is always `reviewed: false`.
@@ -149,7 +149,7 @@ Format: decision, alternatives considered, why.
 - Why: government PDFs name fields `TextField1[3]` or (really) `breastcancer[2]` for "wages/self-employment". Tooltips are usually descriptive; when they're the authoring tool's default, we use the words printed to the left of (or above) the box. Page text is trimmed to the start of each page to keep a 23-page form fast.
 
 **Medicaid and school meals schemas were hand-written, not generated.**
-- Why: no API key was available on the Lane C machine, and these two are demo-critical. They were built against the PDFs with the same checks ingestion uses, fill-and-verify tested, and are marked reviewed. Ingestion itself is covered by mocked tests and one live test.
+- Why: no API key was available on the machine building the forms, and these two are demo-critical. They were built against the PDFs with the same checks ingestion uses, fill-and-verify tested, and are marked reviewed. Ingestion itself is covered by mocked tests and one live test.
 
 **`fill_pdf` shrinks text to fit a tight box (down to 6pt) before reporting truncation.**
 - Why: the Medicaid date-of-birth boxes are 47pt wide, so "03/14/1988" lost its last digit at the form's 10pt. Real forms are full of boxes like that. Shrinking keeps the full value readable; anything that won't fit at 6pt is still reported by `verify_pdf`.
@@ -165,7 +165,7 @@ Format: decision, alternatives considered, why.
 - How: the model sees short handles ("F12") instead of XFA names like `form1[0].#subform[6].TextField4[0]` (code maps them back, which also stops typos), and only the first two rows of a repeating table (fields whose labels differ only by "#3" or "third"). A field whose label has no row number is never hidden.
 - A second model call happens only when repairing the draft would drop more than a quarter of its questions; otherwise the instant repair wins, since a retry doubles the wait on stage.
 - `FORMLINE_INGEST_MODEL` (shared config, additive) picks a faster model for drafting without touching the strong model used for letters. Default stays the strong model until someone times both.
-- Not done: vision-based filling of flat (non-fillable) PDFs, the C5 stretch goal. Flat, XFA-only and password-protected PDFs get a specific error instead.
+- Not done: vision-based filling of flat (non-fillable) PDFs, a stretch goal. Flat, XFA-only and password-protected PDFs get a specific error instead.
 
 **Twilio retries are deduplicated in memory by `MessageSid`, not in the database.**
 - Alternatives: a `processed_sid` table or a column on `Message`.
@@ -175,12 +175,12 @@ Format: decision, alternatives considered, why.
 - Why: a forged request shouldn't trigger a reply or reveal anything, while a real person must never be left with silence because the brain or a media download failed. A failed photo download is skipped (the turn still runs) rather than failing the whole message.
 
 **Tests run with Twilio credentials blanked and signature validation off (`tests/conftest.py`).**
-- Why: real credentials in a developer's `.env` must never make a test send a real text, and other lanes' tests post unsigned webhooks. `tests/test_channels_messaging.py` turns validation back on to test it.
+- Why: real credentials in a developer's `.env` must never make a test send a real text, and other tests post unsigned webhooks. `tests/test_channels_messaging.py` turns validation back on to test it.
 **Demo rehearsal fills all three forms for the seeded persona, from memory, in the test suite.**
-- Why: it's the on-stage path end to end (Lane D's seed -> memory -> schema `profile_key` -> PDF -> verify) and it caught a real bug: the seeded SNAP case number `IL-SNAP-448120` is 14 characters, but the school meals box holds 9, so it would print cut off. The seed now uses `448120917`, and the schema validates the case number (up to 9 letters or digits) so a longer one is re-asked. `FORMLINE_KEEP_DEMO_PDFS=1` keeps the filled PDFs in `data/demo/filled/` for eyeballing.
+- Why: it's the on-stage path end to end (the demo seed -> memory -> schema `profile_key` -> PDF -> verify) and it caught a real bug: the seeded SNAP case number `IL-SNAP-448120` is 14 characters, but the school meals box holds 9, so it would print cut off. The seed now uses `448120917`, and the schema validates the case number (up to 9 letters or digits) so a longer one is re-asked. `FORMLINE_KEEP_DEMO_PDFS=1` keeps the filled PDFs in `data/demo/filled/` for eyeballing.
 
 **`app/pdf/format.py`: `pdf_value(field, answer)` turns stored values into what paper forms expect.**
-- Why: memory stores ISO dates and E.164 phones, so the Medicaid PDF showed `+12025550101` and dates as `1988-03-14`. US forms want `(202) 555-0101` and `03/14/1988`, money without "$", and the form's own checkbox states. Lane A's completion step can call it per field.
+- Why: memory stores ISO dates and E.164 phones, so the Medicaid PDF showed `+12025550101` and dates as `1988-03-14`. US forms want `(202) 555-0101` and `03/14/1988`, money without "$", and the form's own checkbox states. The brain's completion step can call it per field.
 
 **Option labels are read from whichever side the form prints them.**
 - Why: the SNAP and Medicaid forms print "[ ] Yes [ ] No"; the SNAP renewal prints "Yes [ ] No [ ]". Reading only the word right of a button mapped the second layout backwards. If the word just left of a group's leftmost button is Yes/No/Sí, labels are on the left.
@@ -403,3 +403,9 @@ Format: decision, alternatives considered, why.
 - Alternatives: a blank new tab (the agent can't act on Chrome's new-tab page); letting the model give an address.
 - Why: callers ask for "a new tab" or for a site they don't have open. The `new_tab` action takes search words, and the extension builds the search address itself, so the rule that the model never types web addresses still holds. From the results the agent clicks through like on any page.
 - Cost: this is the first way the agent can reach a website the caller didn't already have open, and the search goes to Google. Consequential steps there still need a spoken yes, and "previous" returns to the tab it came from.
+
+## Team process
+
+**Dropped the four-lane split now that the initial build is merged.**
+- Alternatives: keep per-person file ownership; assign the newer code (browser agent, phone-only forms) to lanes.
+- Why: every phase of the original plan is merged, and most new work (call the internet, phone-only forms, caller language) crosses several areas at once. Ownership rules made those changes awkward without preventing real conflicts. What still protects us: shared files stay small and announced, modules call each other through the functions in `docs/TEAM.md`, PRs need passing CI, and nobody pushes to `main`.

@@ -1,4 +1,4 @@
-"""Fill AcroForm PDFs. Owner: Lane C."""
+"""Fill AcroForm PDFs."""
 
 import logging
 from pathlib import Path

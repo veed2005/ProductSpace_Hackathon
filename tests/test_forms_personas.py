@@ -1,4 +1,4 @@
-"""Demo rehearsal: fill all three Illinois forms for Lane D's seeded persona, from memory.
+"""Demo rehearsal: fill all three Illinois forms for the seeded demo persona, from memory.
 
 Mirrors what the brain does at completion: memory-mapped fields come from the profile (via
 memory.get_value / format_value), everything else from the persona's spoken answers, then

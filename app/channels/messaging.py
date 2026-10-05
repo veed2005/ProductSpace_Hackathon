@@ -1,4 +1,4 @@
-"""Twilio SMS/MMS webhook. Owner: Lane B.
+"""Twilio SMS/MMS webhook.
 
 POST /twilio/messaging  (configure on the Twilio number)
 

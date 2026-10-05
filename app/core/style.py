@@ -1,4 +1,4 @@
-"""Per-channel reply style rules passed to the LLM. Owner: Lane A."""
+"""Per-channel reply style rules passed to the LLM."""
 
 from app.contracts import Channel
 

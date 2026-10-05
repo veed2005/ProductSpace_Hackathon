@@ -1,4 +1,4 @@
-"""Cross-lane wiring tests. If one of these breaks, a contract between lanes broke."""
+"""Wiring tests across modules. If one of these breaks, a contract between modules broke."""
 
 from pathlib import Path
 

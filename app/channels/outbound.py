@@ -1,4 +1,4 @@
-"""Send texts to people. Owner: Lane B.
+"""Send texts to people.
 
 Used by everyone who needs to reach a person outside a reply: receipts, reminders,
 "reply with a photo" during a call. Without Twilio credentials it only logs, so local

@@ -1,24 +1,11 @@
 # Formline
 
-Phone-based (voice + SMS) assistant. Primary product: "call the internet": a caller's paired Chrome extension lets Formline operate the website they have open (`app/agent`, `app/browser`, `extension/`, `demo_sites/`; see `docs/CALL_THE_INTERNET.md`). The original government-form and letter assistant still answers callers without a paired browser. Hackathon prototype built by four people working in parallel lanes.
+Phone-based (voice + SMS) assistant. Primary product: "call the internet": a caller's paired Chrome extension lets Formline operate the website they have open (`app/agent`, `app/browser`, `extension/`, `demo_sites/`; see `docs/CALL_THE_INTERNET.md`). The original government-form and letter assistant still answers callers without a paired browser. Hackathon prototype built by a team of four.
 
-## Your lane comes first
+## Working in this repo
 
-A session-start hook (`scripts/lane.py session-start`) tells you which lane this user owns. If it didn't, or it says "unknown", ask the user which lane they own before changing code, then run `python3 scripts/lane.py set <A|B|C|D>`.
-
-| Lane | Owner | Plan |
-|---|---|---|
-| A: Conversation brain | aryavsaigal | `docs/lanes/LANE_A.md` |
-| B: Channels + identity | Edoubek1024 | `docs/lanes/LANE_B.md` |
-| C: Forms, PDFs, documents | luisNava111 | `docs/lanes/LANE_C.md` |
-| D: Memory, dashboard, metrics, demo | veed2005 | `docs/lanes/LANE_D.md` |
-
-- **Read the user's lane plan** and work through its phases in order. When the user says "start Phase X1" or "next phase", do that phase only, then stop and summarize how to try it.
-- **Edit only files owned by the user's lane.** Check ownership with `python3 scripts/lane.py owner <path>`. If another lane's file needs a change, don't make it: tell the user what to ask that lane's owner for, and work against the existing stub meanwhile.
 - **Shared files** (`app/contracts.py`, `app/models.py`, `app/events.py`, `app/llm/client.py`, `app/config.py`, `app/main.py`, `pyproject.toml`): only small, additive changes, and tell the user to announce them to the team.
-- Cross-lane calls go only through the functions listed in `docs/TEAM.md`. `docs/PLAN.md` shows which phase delivers each dependency.
-- **Every phase in the lane plans is merged** (as of #24). Ask the user what to work on rather than restarting a phase.
-- **The call-the-internet code has no lane owner yet** (`app/agent/`, `app/browser/`, `extension/`, `demo_sites/` and their scripts and tests; `lane.py owner` says `unowned`). Ask the user before editing it until the team assigns it.
+- Modules call each other only through the functions listed in `docs/TEAM.md`.
 - **New computer:** what git doesn't carry (`.env`, `data/`, ngrok's token, the extension) is listed under "Moving to another computer" in `docs/CALL_THE_INTERNET.md`.
 
 ## Product rules
@@ -40,13 +27,12 @@ uv run uvicorn app.main:app --reload
 uv run python scripts/simulate.py --phone +15550001111 --channel sms
 uv run python scripts/extension_smoke.py   # real Chromium + extension, no LLM
 uv run python scripts/e2e_golden_path.py   # real LLM + Chromium + simulated call
-python3 scripts/lane.py check          # files on this branch outside the user's lane
 ```
 
 ## Git
 
 - Never commit or push to `main`. Changes land only through PRs with passing CI (the pre-push hook blocks direct pushes).
-- Branch from fresh `main` as `<lane>/<phase>-<what>` (e.g. `c/c1-pdf-verify`).
+- Branch from fresh `main` as `<area>/<what>` (e.g. `agent/new-tab`).
 - Keep PRs small; `uv run pytest` must pass.
 - Open the PR with `gh pr create --fill`.
-- Put tests in the lane's own `tests/test_<area>_*.py` files.
+- Put tests in `tests/test_<area>_*.py` files.

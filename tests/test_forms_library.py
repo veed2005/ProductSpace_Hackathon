@@ -23,7 +23,7 @@ def no_model(monkeypatch):
 
     monkeypatch.setattr(llm, "structured", unavailable)
 
-# Fake persona answers for the SNAP schema, keyed by field id (what Lane A collects).
+# Fake persona answers for the SNAP schema, keyed by field id (what the brain collects).
 ROSA = {
     "applicant_name": "Rosa Martinez", "date_of_birth": "03/14/1988",
     "address": "1420 W Maple St, Apt 3, Springfield, IL 62704", "phone": "(217) 555-0104",
@@ -37,7 +37,7 @@ ROSA = {
 
 
 def _pdf_values(answers: dict[str, str]) -> dict[str, str]:
-    """What Lane A does at completion: map answers to {pdf_field: value} via pdf_values."""
+    """What the brain does at completion: map answers to {pdf_field: value} via pdf_values."""
     schema = form_library.load_schema("il_snap")
     by_id = {f.id: f for f in schema.fields}
     return {by_id[k].pdf_field: by_id[k].pdf_values.get(v, v) for k, v in answers.items() if by_id[k].pdf_field}

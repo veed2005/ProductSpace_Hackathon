@@ -1,6 +1,6 @@
-"""Reminder texts for deadlines and follow-ups. Owner: Lane B.
+"""Reminder texts for deadlines and follow-ups.
 
-Callers: Lane A (after a document with a deadline, with the person's OK), Lane D (dashboard
+Callers: the brain (after a document with a deadline, with the person's OK), the dashboard (
 "Send reminder now").
 
 A background scheduler (started with the app) checks every minute and sends reminders whose

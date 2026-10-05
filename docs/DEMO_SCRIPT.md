@@ -149,4 +149,4 @@ At the last clean rehearsal:
 
 The original flow, where Rosa fills out SNAP by phone in Spanish, texts a photo of a Medicaid letter, and fills the renewal from memory, is still in the product. But `uv run python scripts/demo_replay.py` shows it isn't stage-ready yet. Spanish answers are misread or answered in English, and a PDF field overflows so verification fails (details in `docs/REVIEW_DEMO_PATH.md`). It also depends on texting, which waits on the A2P registration.
 
-If Lane A fixes it and the replay runs clean, it can return as a short Act 4. The full Rosa script, persona card and printable letter (`scripts/make_demo_letter.py`) are in this file's previous version: `git show f189498:docs/DEMO_SCRIPT.md`.
+If the conversation brain gets fixed and the replay runs clean, it can return as a short Act 4. The full Rosa script, persona card and printable letter (`scripts/make_demo_letter.py`) are in this file's previous version: `git show f189498:docs/DEMO_SCRIPT.md`.

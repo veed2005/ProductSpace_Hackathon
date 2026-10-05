@@ -1,4 +1,4 @@
-"""Intent classification. Owner: Lane A."""
+"""Intent classification."""
 
 from typing import Literal
 

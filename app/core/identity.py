@@ -1,6 +1,6 @@
-"""Sessions, profiles, PINs, shared phones. Owner: Lane B.
+"""Sessions, profiles, PINs, shared phones.
 
-The brain (Lane A) decides *when* to ask for a PIN or who's calling; these functions
+The brain (app/core/turn.py) decides *when* to ask for a PIN or who's calling; these functions
 do the storage and checks.
 
 PIN model: 4 digits, salted PBKDF2 hash. A correct PIN counts for 30 minutes in that session.
