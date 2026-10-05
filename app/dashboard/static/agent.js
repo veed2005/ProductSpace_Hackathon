@@ -33,6 +33,9 @@
       confirm_stale: ["↺", "Page changed after the yes, so nothing was pressed"],
       verified: ["🏁", `Success verified on the page: ${q(L)}`],
       unverified: ["✗", `Claimed done without proof on the page`], rejected: ["✗", `Refused an invalid step`],
+      autofill_offer: ["?", `Asked to fill in from saved details: ${esc(L)}`],
+      autofill_accepted: ["✔", `Caller said yes to filling in saved details: ${esc(L)}`],
+      autofill_declined: ["✋", `Saved details not used: ${esc(L)}`],
       blocked: ["⚠", `Needs the person at the computer: ${q(L)}`], stopped: ["■", "Stopped by the caller"],
     };
     let [icon, text] = rows[a.kind] || ["•", esc(a.kind)];

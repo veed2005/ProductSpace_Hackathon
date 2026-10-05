@@ -5,6 +5,8 @@ one memory per person: shown on the dashboard's Memory tab and erased by "forget
 
     recall  The agent only exists after the PIN is accepted (app/agent/call.py), so saved facts reach the model
             only then. Sensitive facts are never shown. Stale ones are marked so the agent checks them first.
+    fill    Saved facts are typed into a form only after the caller agrees to it (the runner asks). `saved`
+            and `source_of` let code tell which saved fact a typed value comes from.
     learn   The model may propose `remember` items (key + value the caller said). Code checks the key is a real
             profile path and the value has the right shape; nothing is saved until the caller says yes.
             Saved with source "conversation" and ref "browser_task:<id>".
@@ -65,6 +67,100 @@ def recall(profile_id: int) -> str:
         lines.append(line)
     text = "\n".join(lines)
     return text if len(text) <= MAX_RECALL_CHARS else text[:MAX_RECALL_CHARS].rsplit("\n", 1)[0]
+
+
+# ---------------------------------------------------------------- fill in a form from what's saved
+
+# How a saved fact is named out loud when offering to fill it in.
+_FILL_WORDS = {
+    "en": {"name": "name", "date_of_birth": "date of birth", "phone": "phone number", "email": "email address",
+           "address": "address", "mailing_address": "mailing address", "household_size": "household size",
+           "employment": "job details", "monthly_income": "monthly income", "housing_cost": "rent or mortgage",
+           "preferred_language": "language"},
+    "es": {"name": "nombre", "date_of_birth": "fecha de nacimiento", "phone": "número de teléfono",
+           "email": "correo electrónico", "address": "dirección", "mailing_address": "dirección postal",
+           "household_size": "tamaño del hogar", "employment": "datos de empleo",
+           "monthly_income": "ingreso mensual", "housing_cost": "renta o hipoteca", "preferred_language": "idioma"},
+}
+
+
+@dataclass
+class Saved:
+    key: str  # top-level fact, e.g. "address"
+    fresh: bool
+    leaves: list[str]  # every value inside it, as text: ["412 Elm St", "Springfield", "IL", "62704"]
+
+
+def _leaves(value: Any) -> list[str]:
+    if isinstance(value, dict):
+        return [leaf for v in value.values() for leaf in _leaves(v)]
+    if isinstance(value, list):
+        return [leaf for v in value for leaf in _leaves(v)]
+    if isinstance(value, bool) or value in (None, ""):
+        return []  # yes/no answers are too common to trace back to a saved fact
+    if isinstance(value, float) and value == int(value):
+        return [str(int(value))]
+    return [str(value)]
+
+
+def saved(profile_id: int) -> list[Saved]:
+    """The facts `recall` shows the model, flattened so a typed value can be traced back to one."""
+    out = []
+    for key, fact in memory.get_facts(profile_id).items():
+        spec = memory.CANONICAL_KEYS.get(key)
+        if key in NEVER or fact.sensitive or (spec and spec.sensitive):
+            continue
+        leaves = _leaves(fact.value)
+        if leaves:
+            out.append(Saved(key=key, fresh=fact.fresh, leaves=leaves))
+    return out
+
+
+def words(text: Any) -> list[str]:
+    return re.findall(r"[^\W_]+", str(text).casefold())
+
+
+def _same_date(leaf: str, value: str) -> bool:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", leaf):
+        return False
+    from app.agent import fields
+
+    return any((d := fields.parse_date(value, order)) is not None and d.isoformat() == leaf
+               for order in (["MM", "DD", "YYYY"], ["DD", "MM", "YYYY"]))
+
+
+def _same_number(leaf: str, value: str) -> bool:
+    """Phone numbers: +12175550104 and (217) 555-0104 are the same."""
+    a, b = re.sub(r"\D", "", leaf), re.sub(r"\D", "", value)
+    return len(a) >= 7 and len(b) >= 7 and not re.search(r"[^\W\d_]", leaf) and a[-10:] == b[-10:]
+
+
+def source_of(value: Optional[str], facts: list[Saved], *, strict: bool = False) -> Optional[Saved]:
+    """The saved fact a typed value comes from, if any: one of its values (dates and phone numbers in any
+    format), or several of its words together ("Ana Lopez", a whole address). `strict` is for values the model
+    didn't say came from memory: very short ones ("3", "IL") are not traced, since they match by accident."""
+    said = words(value or "")
+    squashed = "".join(said)
+    if not squashed or (strict and len(squashed) < 3):
+        return None
+    for fact in facts:
+        for leaf in fact.leaves:
+            if "".join(words(leaf)) == squashed or _same_date(leaf, value) or _same_number(leaf, value):
+                return fact
+        pool = {w for leaf in fact.leaves for w in words(leaf)}
+        if len(said) >= 2 and all(w in pool for w in said):
+            return fact
+    return None
+
+
+def fill_offer_text(keys: list[str], language: str) -> str:
+    """The question asked before saved facts are typed into a form. Names what's saved, never the values."""
+    table = _FILL_WORDS["es" if language == "es" else "en"]
+    items = [table.get(k) or memory.FACT_LABELS.get(k, k.replace("_", " ")).lower() for k in keys]
+    joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + (" y " if language == "es" else " and ") + items[-1]
+    if language == "es":
+        return f"Ya tengo guardado su {joined}. ¿Quiere que lo complete por usted?"
+    return f"I already have your {joined} saved. Would you like me to fill that in for you?"
 
 
 # ---------------------------------------------------------------- learn

@@ -35,7 +35,9 @@ class Decision(BaseModel):
     # confirm: `steps` holds the single consequential step  done: the page shows the goal is achieved
     # answer: reply to the caller's question from what the page/document says (conversation continues)
     # blocked: the person must do something at the computer (login, CAPTCHA, code) or it can't be done
-    kind: Literal["act", "ask_user", "confirm", "done", "answer", "blocked"]
+    # offer_fill: `steps` are the fields that saved details about the caller could fill in; code asks the caller
+    #             whether to use them and types them only after a yes
+    kind: Literal["act", "ask_user", "confirm", "done", "answer", "blocked", "offer_fill"]
     steps: list[Step]
     say: str  # spoken to the caller: status, question, confirmation summary, or result
     reason: str  # one short sentence for the partner dashboard; no personal details
@@ -46,3 +48,6 @@ class Decision(BaseModel):
     # The language of the caller's latest message as a two-letter code ("fr"), when it's clear. Only a proposal:
     # code checks it against the supported call languages before the call switches (app/agent/call.py).
     language: Optional[str] = None
+    # ask_user: the snapshot id of the one form field the question is for (null when it isn't about a field).
+    # Code holds the model to filling that field in with the caller's answer before it asks anything else.
+    field_id: Optional[str] = None
