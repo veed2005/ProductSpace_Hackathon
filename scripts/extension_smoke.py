@@ -145,6 +145,15 @@ def main() -> int:
                 assert not r["success"] and r["error"] == "unsupported_page", r
                 assert blocked[0]["url"] == "", blocked[0]
             print("tabs: switched back to the first tab and forward again; closed and unusable tabs refused")
+            before = len(tabs)
+            r = server.command("new_tab", tab_id=hours_tab, value="maple county library hours")
+            assert r["success"] and r["new_tab_id"] not in tabs and r["page_changed"], r
+            assert r["url_after"].startswith("https://www.google.com/") and "maple" in r["url_after"].lower(), r
+            now = {t["tab_id"]: t for t in server.command("list_tabs", tab_id=r["new_tab_id"])["tabs"]}
+            assert len(now) == before + 1 and now[r["new_tab_id"]]["active"], now
+            empty = server.command("new_tab", tab_id=hours_tab, value="  ")
+            assert not empty["success"] and empty["error"] == "invalid_action", empty
+            print("new tab: opened a web search in a new tab next to the current one ->", r["url_after"][:60])
             print("\nEXTENSION SMOKE TEST PASSED")
             return 0
         except Exception:

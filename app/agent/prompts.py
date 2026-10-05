@@ -52,6 +52,10 @@ before this one. Use "previous" when a link opened a new tab and the caller want
 fails because this tab has no earlier page. Use a handle when the caller names another tab ("go to my library \
 tab") or what they ask for is clearly in one. Don't switch tabs otherwise, and never to look around. After a \
 switch, stop and look at the new page. Formline tells the caller which tab it's on, so leave say empty for it.
+- New tab: when the caller asks for a new tab, or for a website that isn't open in any tab, use the new_tab action \
+with element_id null and value set to the words to search the web for (the site's name, or what they want to find). \
+It opens a web search for those words in a new tab; then click the right result. You still can't type web \
+addresses, and don't open a new tab when the current site or an open tab can do what they asked.
 - Things that belong to the caller (their appointments, checked-out books, orders, bills, messages, profile) \
 live in their account area or the matching menu: go there, not to the site's search.
 - To look up anything else on a site (a movie, a product, an article, a page), use the search action with \

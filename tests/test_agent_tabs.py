@@ -16,7 +16,7 @@ from app.db import session_scope
 from app.models import BrowserAction
 from fake_portal import S, act
 
-LIBRARY, HOURS, CLINIC, SETTINGS = 1, 3, 2, 9
+LIBRARY, HOURS, CLINIC, SETTINGS, SEARCH = 1, 3, 2, 9, 4
 
 
 class FakeWindow(BrowserConnection):
@@ -57,6 +57,11 @@ class FakeWindow(BrowserConnection):
 
     async def act(self, action, *, tab_id, doc_id=None, element_id=None, value=None) -> ActionResult:
         self.clicks.append((tab_id, element_id))
+        if action == "new_tab":  # a web search for `value` in a new tab, which comes to the front
+            self.tabs_open[SEARCH] = {"title": f"{value} - Google Search", "url": "https://www.google.com/search"}
+            self.active = SEARCH
+            return ActionResult(success=True, action=action, page_changed=True, new_tab_id=SEARCH,
+                                url_after="https://www.google.com/search")
         if tab_id == LIBRARY and element_id == "e1":  # target=_blank: a new tab opens and comes to the front
             self.tabs_open[HOURS] = {"title": "Branch hours - Maple County Public Library",
                                      "url": "http://library.test/hours.html"}
@@ -325,3 +330,39 @@ def test_yes_after_a_tab_change_does_not_press_the_button():
     assert window.clicks == []  # the stored step never ran, on either tab
     assert any(a.kind == "confirm_stale" for a in actions())
     assert "The person switched to another tab" in model.prompts[1]
+
+
+# ---------------------------------------------------------------- opening a new tab
+
+
+def test_new_tab_needs_words_to_search_for():
+    page = PageState(doc_id="d1", url="http://library.test/", elements=[])
+    assert validate_step(S("new_tab", None, "weather in Springfield"), page) is None
+    for bad in (None, "", "   ", "x" * 201):
+        assert "new_tab" in validate_step(S("new_tab", None, bad), page)
+
+
+def test_agent_opens_a_new_tab_on_a_web_search_and_can_go_back():
+    model = Scripted(act(S("new_tab", None, "Springfield weather"), say="Okay, opening a new tab."),
+                     answer("I've opened a search for Springfield weather."),
+                     act(S("switch_tab", None, "previous")), answer("You're back on the library page."))
+
+    async def scenario():
+        window = FakeWindow()
+        agent, said = make(window, model)
+        await agent.handle("Open a new tab and look up the weather in Springfield.")
+        await settle(agent)
+        opened = (window.active, agent.browser.tab_id)
+        await agent.handle("Go back to the library.")
+        await settle(agent)
+        return window, agent, said, opened
+
+    window, agent, said, opened = run(scenario())
+    assert opened == (SEARCH, SEARCH)
+    assert "(you are here)" in next(line for line in model.prompts[1].splitlines()
+                                    if line[:1] == "T" and line[1:2].isdigit() and "Google Search" in line)
+    assert window.active == LIBRARY and agent.browser.tab_id == LIBRARY  # "previous" is the tab it came from
+    assert SEARCH in window.tabs_open  # going back closed nothing
+    opened_row = next(a for a in actions() if a.kind == "new_tab")
+    assert opened_row.ok and opened_row.value == "Springfield weather"
+    assert "The person switched" not in "".join(model.prompts)

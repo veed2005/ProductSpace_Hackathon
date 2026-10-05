@@ -238,7 +238,26 @@ async function switchTab(tabId, targetId) {
     page_changed: true, new_tab_id: after.id };
 }
 
+// Open a new tab next to the current one, on a web search for the given words. The address is built here from
+// the words: the backend never supplies one.
+async function newTab(tabId, words) {
+  const query = String(words || "").trim().slice(0, 200);
+  if (!query) throw err("invalid_action", "A new tab needs words to search for.");
+  let current = null;
+  try {
+    current = await resolveTab(tabId);
+  } catch (e) { /* no usable tab right now; open one anyway */ }
+  const created = await chrome.tabs.create({
+    url: "https://www.google.com/search?q=" + encodeURIComponent(query), active: true,
+    ...(current ? { windowId: current.windowId, index: current.index + 1 } : {}),
+  });
+  const after = await waitForLoad(created.id);
+  return { success: true, action: "new_tab", url_before: current ? current.url : null, url_after: after.url,
+    page_changed: true, new_tab_id: created.id };
+}
+
 async function run(action, args, tabId) {
+  if (action === "new_tab") return newTab(tabId, args.value);
   if (action === "list_tabs") return listTabs(tabId);
   if (action === "switch_tab") return switchTab(tabId, args.target_tab_id);
   let tab = await resolveTab(tabId);
