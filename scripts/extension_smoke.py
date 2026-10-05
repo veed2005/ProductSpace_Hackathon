@@ -8,6 +8,7 @@ password/hidden values never leave the browser, and actions report real page cha
 
 import sys
 import time
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -154,6 +155,15 @@ def main() -> int:
             empty = server.command("new_tab", tab_id=hours_tab, value="  ")
             assert not empty["success"] and empty["error"] == "invalid_action", empty
             print("new tab: opened a web search in a new tab next to the current one ->", r["url_after"][:60])
+            if blocked:  # a lookup from a blank tab: the page can't be read, but a search still opens next to it
+                try:
+                    server.command("get_page_state", tab_id=blocked[0]["tab_id"])
+                    raise AssertionError("a blank tab should not be readable")
+                except urllib.error.HTTPError as e:
+                    assert e.code == 409, e
+                r = server.command("new_tab", tab_id=blocked[0]["tab_id"], value="weather in springfield")
+                assert r["success"] and r["new_tab_id"] not in now and r["url_after"].startswith("https://www.google.com/"), r
+                print("new tab: a blank tab can't be read, but a lookup from it still opens a search")
             print("\nEXTENSION SMOKE TEST PASSED")
             return 0
         except Exception:

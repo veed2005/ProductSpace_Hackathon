@@ -25,6 +25,7 @@ from typing import Awaitable, Callable, Optional, Protocol
 
 from fastapi.concurrency import run_in_threadpool
 
+from app.agent import fields
 from app.agent import memory as agent_memory
 from app.agent import store
 from app.agent.decision import Decision, Step
@@ -32,7 +33,7 @@ from app.agent.policy import classify_reply, is_consequential, is_stop, page_fin
 from app.agent.prompts import CONFIRM_NUDGE, system_prompt
 from app.agent.render import looks_loading, page_text, site_name, tab_name, tabs_text
 from app.browser.hub import BrowserConnection, BrowserGone, PageUnavailable
-from app.browser.protocol import ActionResult, PageState, TabInfo
+from app.browser.protocol import ActionResult, PageElement, PageState, TabInfo
 from app.browser.sanitize import mask
 from app.config import get_settings
 from app.events import log_event
@@ -45,6 +46,8 @@ MAX_DECISIONS = 16  # model calls per caller turn before checking in with the ca
 MAX_ERRORS = 3
 NARRATE_EVERY_S = 6.0
 FILLER_AFTER_S = 2.2
+FILL_ACTIONS = {"type", "clear", "select", "check", "uncheck"}  # steps a question may carry: they only fill in fields
+MAX_AUTOFILL = 12  # fields one "fill it in from what you have saved?" may cover
 CONFIRM_TTL_S = 300
 DECIDE_TIMEOUT_S = 30.0
 
@@ -63,6 +66,8 @@ SAY = {
         "press": "I'm ready to press {label}. Should I go ahead?",
         "remembered": "Got it. I'll remember that for next time.",
         "not_remembered": "Okay, I won't save it.",
+        "autofilled": "Okay, I filled that in.",
+        "autofill_declined": "No problem. I'll ask you instead.",
         "tab": "I'm on your {name} tab now.",
     },
     "es": {
@@ -79,6 +84,8 @@ SAY = {
         "press": "Estoy listo para presionar {label}. ¿Lo hago?",
         "remembered": "Listo. Lo recordaré para la próxima vez.",
         "not_remembered": "De acuerdo, no lo guardaré.",
+        "autofilled": "Listo, ya lo completé.",
+        "autofill_declined": "No hay problema. Se lo preguntaré.",
         "tab": "Ahora estoy en la pestaña de {name}.",
     },
 }
@@ -194,6 +201,20 @@ class ConnectionPort:
 
 Decider = Callable[[str, list[dict]], Awaitable[Decision]]
 
+NO_PAGE_CODES = {"unsupported_page", "no_tab"}  # the tab isn't a web page the extension can read
+NO_PAGE_DOC = "no-page"
+
+
+def no_page() -> PageState:
+    """What the model is shown when the tab can't be read (a blank new tab, a browser settings page), so a
+    caller who asks to look something up still gets a search in a new tab. Anything else it decides here is
+    dropped and the caller is asked to open a website, as before."""
+    return PageState(doc_id=NO_PAGE_DOC, url="", title="No readable page", site_name="a blank tab", elements=[
+        PageElement(role="text", label=(
+            "This tab is not a web page you can read or act on (a blank tab or a browser page). You can only "
+            "use new_tab (to look something up or reach a website by searching for it) or switch_tab to a tab "
+            "in the tab list. If the caller's request needs neither, return blocked."))])
+
 
 async def llm_decide(system: str, messages: list[dict]) -> Decision:
     return await asyncio.wait_for(
@@ -287,6 +308,10 @@ class BrowserAgent:
         self._loop_task: Optional[asyncio.Task] = None
         self._stopping = False
         self._offers: list[agent_memory.Proposal] = []  # details the caller gave, waiting to be offered for saving
+        # May saved details be typed into forms for this request? None: not asked yet. True/False: the caller's answer.
+        self._autofill: Optional[bool] = None
+        # (page doc id, element id) of the form field the caller just answered a question about
+        self._answered_field: Optional[tuple[str, str]] = None
 
     # ------------------------------------------------------------ public
 
@@ -320,8 +345,13 @@ class BrowserAgent:
         if is_stop(text) and self.task_id and self.status in ("active", "waiting_input"):
             await self.stop(spoken=True)
             return
+        if self.pending and self.pending.get("type") == "autofill":
+            await self._resolve_autofill(text)
+            return
         answering = bool(self.pending and self.pending.get("type") == "question")
         carry_on = self.last_outcome in ("blocked", "trouble", "stopped", "long") and _CONTINUE.match(_norm(text))
+        self._answered_field = ((self.pending.get("doc"), self.pending["field"])
+                                if answering and self.pending.get("field") else None)
         if self.task_id is None or not (answering or carry_on):
             await self._new_task(text)  # a new request ("who's Peter New?", "check my profile") starts fresh
         else:
@@ -424,6 +454,7 @@ class BrowserAgent:
         self.goal = goal
         self.history, self.notes = [], []
         self._done_steps = []
+        self._autofill = None
         if earlier:
             self.notes.append("This is the caller's latest request. Use the earlier conversation for context when "
                               "they refer back to something ('that one', 'what about dogs?'), but don't fill in "
@@ -441,19 +472,69 @@ class BrowserAgent:
     async def _loop(self) -> None:
         errors = 0
         doubted = False  # an answer's quote already failed once this turn
+        reworded = False  # a question already went back once for asking several things or reading a format hint
+        unfilled = False  # a question already went back once because the caller's last answer wasn't typed in
         narrated = False
         for _ in range(MAX_DECISIONS):
-            page = await self._page()
+            try:
+                page = await self._page()
+            except PageUnavailable as e:
+                if e.code not in NO_PAGE_CODES:
+                    raise
+                page = no_page()  # a blank tab or a browser page: the model can still open a search in a new tab
             decision = await self._decide(page)
+            if page.doc_id == NO_PAGE_DOC and not (
+                    decision.kind == "act" and decision.steps and decision.steps[0].action in ("new_tab", "switch_tab")):
+                raise PageUnavailable("unsupported_page", "nothing to do without a readable page")
             kind = decision.kind
 
             if kind == "ask_user":
+                page, offered = await self._fill_before_asking(decision, page)
+                if offered:
+                    return
+                answered = None
+                if self._answered_field and self._answered_field[0] == page.doc_id:  # still the same page
+                    answered = page.control(self._answered_field[1])
+                if (answered and not unfilled and not (answered.value or "").strip()
+                        and decision.field_id != answered.id):
+                    # The caller answered a question about this field, but the model moved on without filling it.
+                    unfilled = True
+                    store.add_action(self.task_id, "rejected", element_label=decision.say, ok=False,
+                                     error="Asked the next question before typing the last answer",
+                                     reason=decision.reason)
+                    reply = next((t for who, t in reversed(self.transcript) if who == "caller"), "")
+                    self.notes.append(f"You asked the caller for [{answered.id}] {answered.label!r}, they replied "
+                                      f"{reply!r}, and the field is still empty. Type their answer into it now "
+                                      "(act) before you ask anything else. Carry on without it only if that reply "
+                                      "clearly isn't an answer (they skipped it or asked you something).")
+                    continue
+                problem = fields.question_problem(decision.say, page)
+                if problem and not reworded:
+                    # One chance to ask for a single field in plain words; after that it's asked anyway, with any
+                    # format hint taken out, so the caller is never left waiting.
+                    reworded = True
+                    store.add_action(self.task_id, "rejected", element_label=decision.say, ok=False, error=problem,
+                                     reason=decision.reason)
+                    self.notes.append(problem)
+                    continue
+                decision.say = fields.strip_hints(decision.say)
                 self.last_outcome = "question"
                 self.pending = {"type": "question", "say": decision.say}
+                target = page.control(decision.field_id)
+                if target is not None and target.role in fields.FIELD_ROLES:
+                    self.pending.update(field=target.id, doc=page.doc_id)
                 self._persist(status="waiting_input", pending=self.pending)
                 store.add_action(self.task_id, "ask", element_label=decision.say, reason=decision.reason)
                 await self._say(decision.say)
                 return
+
+            if kind == "offer_fill":
+                if await self._offer_autofill(decision.steps, page, decision.reason):
+                    return
+                errors += 1  # nothing in it could be offered (the notes say why); don't let it loop
+                if errors >= MAX_ERRORS:
+                    break
+                continue
 
             if kind == "answer":
                 problem = self._unsupported(decision.evidence, page) if decision.evidence else None
@@ -524,11 +605,12 @@ class BrowserAgent:
                         self.notes.append(f"Your confirm step was not accepted: {err}")
                     errors += 1
                     continue
-                await self._request_confirmation(step, page, decision.say, decision.reason)
+                await self._request_confirmation(step, page, fields.strip_hints(decision.say), decision.reason)
                 return
 
-            # act
-            if decision.say and (not narrated or time.monotonic() - self.last_spoke > NARRATE_EVERY_S):
+            # act. Its say is a short status; a question is only ever asked with ask_user, so it isn't said twice.
+            if decision.say and not re.search(r"[?？]", decision.say) and (
+                    not narrated or time.monotonic() - self.last_spoke > NARRATE_EVERY_S):
                 narrated = True
                 await self._say(decision.say)
             for i, step in enumerate(decision.steps[:3]):
@@ -551,6 +633,9 @@ class BrowserAgent:
                 if is_consequential(step, page):
                     await self._confirm_flagged(step, page, decision)
                     return
+                if await self._needs_offer(step) and await self._offer_autofill(
+                        decision.steps[i:3], page, decision.reason, quiet=True):
+                    return  # it was about to type a saved detail without asking: ask first
                 result = await self._execute(step, page, decision.reason)
                 if not result.success:
                     self.notes.append(f"{step.action} [{step.element_id}] failed: {result.error}"
@@ -575,6 +660,27 @@ class BrowserAgent:
         self.last_outcome = "trouble"
         self._persist(status="waiting_input")
         await self._say(await self._t("trouble"))
+
+    async def _fill_before_asking(self, decision: Decision, page: PageState) -> tuple[PageState, bool]:
+        """A question that also carries steps ("type Ana, then ask for the last name"): run the ones that only
+        fill in fields, checked like any other step, so the caller's last answer isn't lost. Nothing is clicked.
+        Returns the page now, and True if the caller was instead asked whether to use their saved details."""
+        for i, step in enumerate(decision.steps[:3]):
+            if step.action not in FILL_ACTIONS:
+                break
+            err = validate_step(step, page)
+            if err or is_consequential(step, page):
+                self.notes.append(f"Step {step.action} [{step.element_id}] was not run: {err or 'needs a yes first'}")
+                break
+            if await self._needs_offer(step) and await self._offer_autofill(
+                    decision.steps[i:3], page, decision.reason, quiet=True):
+                return page, True
+            result = await self._execute(step, page, decision.reason)
+            page = await self._page()
+            if not result.success:
+                self.notes.append(f"{step.action} [{step.element_id}] failed: {result.error}")
+                break
+        return page, False
 
     async def _page(self, *, fresh: bool = False) -> PageState:
         """The current page, after any loading indicator goes away (up to about 6 seconds)."""
@@ -615,6 +721,14 @@ class BrowserAgent:
         shown = page_text(page, previous=self._last_seen)
         self._last_seen = page
         known = await run_in_threadpool(agent_memory.recall, self.profile_id)
+        if known and self._autofill is False:
+            known = ("(hidden: the caller asked you not to use their saved details for this request. Ask them for "
+                     "each field instead.)")
+        elif known and self._autofill:
+            known += "\nThe caller has agreed to use these for this request: type them wherever the form asks."
+        elif known:
+            known += ("\nThe caller has NOT been asked about using these yet: before typing any of them into a "
+                      "form, use offer_fill.")
         tabs = tabs_text(await self._tabs())
         tab_list = (f"Tabs open in this browser window (titles only; you see a tab's page after switching to it):\n"
                     f"{tabs}\n\n") if tabs else ""
@@ -709,6 +823,126 @@ class BrowserAgent:
             offer = await run_in_threadpool(lang_mod.translate, offer, self.language)
         await self._say(offer)
 
+    # ------------------------------------------------------------ filling a form from saved details
+
+    async def _needs_offer(self, step: Step) -> bool:
+        """True if this step would type a saved detail the caller hasn't agreed to reuse and didn't just say:
+        the backstop for a model that skips offer_fill."""
+        if self._autofill is not None or step.action != "type":
+            return False  # already agreed, or declined (then the details aren't shown to the model at all)
+        if self._answered_field and step.element_id == self._answered_field[1]:
+            return False  # the caller's answer to the question just asked
+        said = {w for who, text in self.transcript if who == "caller" for w in agent_memory.words(text)}
+        if all(w in said for w in agent_memory.words(step.value or "")):
+            return False  # the caller said it on this call
+        facts = await run_in_threadpool(agent_memory.saved, self.profile_id)
+        source = agent_memory.source_of(step.value, facts, strict=True)
+        return bool(source and source.fresh)
+
+    async def _offer_autofill(self, steps: list[Step], page: PageState, reason: str, *, quiet: bool = False) -> bool:
+        """Ask the caller whether to fill these fields from their saved details. Only steps that type or choose
+        a value traced to a saved, up-to-date fact are kept; the question names what's saved, never the values.
+        True if the caller was asked. False (with notes for the model, unless `quiet`) if nothing could be
+        offered, or the caller already agreed, in which case the fields are simply filled in."""
+        facts = await run_in_threadpool(agent_memory.saved, self.profile_id)
+        keep, keys, notes = [], [], []
+        for step in steps[:MAX_AUTOFILL]:
+            if step.action not in ("type", "select"):
+                continue
+            el = page.control(step.element_id)
+            err = validate_step(step, page)
+            if err:
+                notes.append(f"offer_fill step [{step.element_id}] was left out: {err}")
+                continue
+            if step.action == "type" and (el.value or "").strip():
+                continue  # already filled in
+            source = agent_memory.source_of(step.value, facts)
+            if source is None:
+                notes.append(f"[{el.id}] {el.label!r} was left out of offer_fill: its value isn't one of the "
+                             "caller's saved details. Ask the caller for it.")
+            elif not source.fresh:
+                notes.append(f"[{el.id}] {el.label!r} was left out of offer_fill: that saved detail may be out "
+                             "of date. Ask the caller whether it's still right.")
+            else:
+                keep.append(step)
+                if source.key not in keys:
+                    keys.append(source.key)
+        if not quiet:
+            self.notes.extend(notes)
+        if not keep:
+            if not quiet:
+                self.notes.append("offer_fill had no field that the caller's saved details can fill. Ask the "
+                                  "caller for what the form needs, one field at a time.")
+            return False
+        if self._autofill:  # they already said yes for this request (say, on the form's previous page)
+            await self._fill(keep, page, reason)
+            return False
+        if self._autofill is False:
+            return False
+        offer = agent_memory.fill_offer_text(keys, self.language)
+        if self.language not in SAY:
+            offer = await run_in_threadpool(lang_mod.translate, agent_memory.fill_offer_text(keys, "en"), self.language)
+        self.last_outcome = "question"
+        self.pending = {"type": "autofill", "steps": [s.model_dump() for s in keep], "doc_id": page.doc_id,
+                        "keys": keys, "say": offer}
+        self._persist(status="waiting_input", pending=self.pending)
+        store.add_action(self.task_id, "autofill_offer", element_label=", ".join(keys), reason=reason)
+        await self._say(offer)
+        return True
+
+    async def _fill(self, steps: list[Step], page: PageState, reason: str) -> int:
+        """Type saved details into the fields the caller agreed to. Each step is checked again on the page as
+        it is now; a field that has a value by now is left alone. Returns how many were filled."""
+        filled = 0
+        for step in steps:
+            el = page.control(step.element_id)
+            if validate_step(step, page) or is_consequential(step, page):
+                continue
+            if step.action == "type" and (el.value or "").strip():
+                continue
+            if (await self._execute(step, page, reason)).success:
+                filled += 1
+            page = await self._page()
+        return filled
+
+    async def _resolve_autofill(self, text: str) -> None:
+        """The caller's reply to "Would you like me to fill that in for you?"."""
+        pending, self.pending = self.pending or {}, None
+        verdict = classify_reply(text, self.language)
+        what = ", ".join(pending.get("keys", []))
+        self._persist(status="active", pending={})
+        if verdict == "yes":
+            self._autofill = True
+            store.add_action(self.task_id, "autofill_accepted", element_label=what, reason="Caller said yes")
+            self._start(self._run_autofill(pending))
+            return
+        if verdict == "no":
+            self._autofill = False
+            store.add_action(self.task_id, "autofill_declined", element_label=what, reason="Caller said no")
+            self.notes.append("The caller doesn't want their saved details used for this request. Ask them for "
+                              "each field, one at a time.")
+            await self._say(await self._t("autofill_declined"))
+        else:
+            store.add_action(self.task_id, "autofill_declined", element_label=what,
+                             reason="Caller said something else")
+            self.notes.append("You offered to fill in the caller's saved details and they said something else "
+                              "(see the conversation). Nothing was filled in. Do what they said.")
+        self._start(self._loop())
+
+    async def _run_autofill(self, pending: dict) -> None:
+        page = await self._page()
+        if page.doc_id != pending.get("doc_id"):
+            self.notes.append("The caller agreed to use their saved details, but the page changed before they "
+                              "were typed. Look again and type them where this page asks.")
+        else:
+            steps = [Step.model_validate(s) for s in pending.get("steps", [])]
+            filled = await self._fill(steps, page, "Caller agreed to use saved details")
+            if filled:
+                await self._say(await self._t("autofilled"))
+            self.notes.append(f"The caller agreed to use their saved details and {filled} field(s) were filled "
+                              "in. Carry on with whatever is still empty, asking for one field at a time.")
+        await self._loop()
+
     async def _resolve_memory_offer(self, text: str) -> bool:
         """The caller's reply to "Would you like me to remember...?". False if they moved on to something else:
         nothing is saved and their words are handled as a new request."""
@@ -756,6 +990,12 @@ class BrowserAgent:
 
     async def _execute(self, step: Step, page: PageState, reason: str) -> ActionResult:
         el = page.control(step.element_id)
+        if step.action == "type":  # "March 14, 1988" goes into a "Birthdate (MM-DD-YYYY)" box as 03-14-1988
+            fitted = fields.fit_value(step.value, el)
+            if fitted != step.value:
+                step = step.model_copy(update={"value": fitted})
+        if self._answered_field and step.action in ("type", "select") and step.element_id == self._answered_field[1]:
+            self._answered_field = None
         label = el.label if el else (step.value or step.action)
         started = time.perf_counter()
         result = await self.browser.act(step, page.doc_id)

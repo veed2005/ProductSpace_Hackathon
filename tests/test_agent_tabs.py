@@ -366,3 +366,72 @@ def test_agent_opens_a_new_tab_on_a_web_search_and_can_go_back():
     opened_row = next(a for a in actions() if a.kind == "new_tab")
     assert opened_row.ok and opened_row.value == "Springfield weather"
     assert "The person switched" not in "".join(model.prompts)
+
+
+# ---------------------------------------------------------------- looking something up
+
+
+class BlankWindow(FakeWindow):
+    """The person's tab is a blank new tab (or a browser page): the extension can't read it."""
+
+    def __init__(self, code: str = "unsupported_page"):
+        super().__init__()
+        self.code = code
+        self.active = SETTINGS
+        self.tab = self._tab(SETTINGS)
+
+    async def page_state(self, tab_id=None, *, fresh=False) -> PageState:
+        from app.browser.hub import PageUnavailable
+
+        if (tab_id or self.active) == SETTINGS:
+            raise PageUnavailable(self.code, "Formline only works on regular web pages.")
+        state = await super().page_state(tab_id, fresh=fresh)
+        if state.tab_id == SEARCH:
+            state.elements.append(PageElement(role="text", label="Springfield: 72 degrees and sunny"))
+        return state
+
+
+def test_a_lookup_from_a_blank_tab_opens_a_search_and_answers_from_it():
+    model = Scripted(act(S("new_tab", None, "Springfield weather"), say="Okay, looking that up."),
+                     answer("It's 72 and sunny in Springfield.", "Springfield: 72 degrees and sunny"))
+
+    async def scenario():
+        window = BlankWindow()
+        agent, said = make(window, model)
+        await agent.handle("Can you look up the weather in Springfield?")
+        await settle(agent)
+        return window, agent, said
+
+    window, agent, said = run(scenario())
+    assert "not a web page you can read" in model.prompts[0]
+    assert window.active == SEARCH and agent.browser.tab_id == SEARCH
+    assert said == ["Okay, looking that up.", "It's 72 and sunny in Springfield."]
+    assert next(a for a in actions() if a.kind == "answer").ok  # its quote was on the results page
+
+
+def test_anything_else_on_a_blank_tab_still_asks_for_a_website():
+    model = Scripted(Decision(kind="ask_user", steps=[], say="Which doctor?", reason="x", evidence=None))
+
+    async def scenario():
+        window = BlankWindow()
+        agent, said = make(window, model)
+        await agent.handle("Book me an appointment.")
+        await settle(agent)
+        return window, said
+
+    window, said = run(scenario())
+    assert said == ["I can't see a web page right now. Open the website you need in Chrome, then tell me when it's up."]
+    assert SEARCH not in window.tabs_open
+
+
+def test_a_browser_that_does_not_answer_is_not_treated_as_a_blank_tab():
+    model = Scripted()
+
+    async def scenario():
+        agent, said = make(BlankWindow(code="timeout"), model)
+        await agent.handle("Look up the weather.")
+        await settle(agent)
+        return said
+
+    said = run(scenario())
+    assert said[-1].startswith("I can't see a web page right now") and model.prompts == []
