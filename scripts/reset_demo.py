@@ -1,4 +1,4 @@
-"""Wipe ALL data (database tables, downloaded media, filled PDFs) and reseed the demo. Owner: Lane D.
+"""Wipe ALL data (database tables, downloaded media, filled PDFs) and reseed the demo.
 
 Works while the server is running.
 

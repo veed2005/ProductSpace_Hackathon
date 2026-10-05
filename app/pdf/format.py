@@ -1,6 +1,6 @@
-"""Turn an answer into the text a paper form expects. Owner: Lane C.
+"""Turn an answer into the text a paper form expects.
 
-For Lane A's completion step: {f.pdf_field: pdf_value(f, answer) for f in schema.fields ...}.
+For the brain's completion step: {f.pdf_field: pdf_value(f, answer) for f in schema.fields ...}.
 Memory stores values in machine form (ISO dates, E.164 phones, numbers, booleans, address
 objects); US government forms expect 03/14/1988, (217) 555-0104, 1300, a checked box.
 """

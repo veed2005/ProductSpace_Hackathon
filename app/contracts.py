@@ -1,6 +1,6 @@
-"""Shared data contracts between lanes.
+"""Shared data contracts between modules.
 
-Everything that crosses a lane boundary is defined here. Changing a model in this
+Everything that crosses a module boundary is defined here. Changing a model in this
 file affects other people's code: announce it in the team chat first, keep changes
 additive (new optional fields), and never rename or remove a field without agreement.
 See docs/TEAM.md.

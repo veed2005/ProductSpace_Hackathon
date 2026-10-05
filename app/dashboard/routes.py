@@ -1,4 +1,4 @@
-"""Dashboard pages and live event stream. Owner: Lane D.
+"""Dashboard pages and live event stream.
 
 Everything here is local-only: requests must come from this machine and not through a proxy
 such as ngrok (which Twilio needs during the demo). See `local_only`.

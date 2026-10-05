@@ -1,18 +1,10 @@
 #!/bin/sh
-# Blocks direct pushes to main and warns about edits outside your lane. See scripts/lane.py.
-# If Python is missing or the script fails, warn and let the push through: a broken helper
-# must never stop someone from pushing their branch.
-ROOT="$(git rev-parse --show-toplevel)"
-PY="$(command -v python3 || command -v python)"
-if [ -z "$PY" ]; then
-  echo "pre-push: Python not found, skipping lane checks." >&2
-  exit 0
-fi
-"$PY" "$ROOT/scripts/lane.py" pre-push
-rc=$?
-if [ "$rc" -eq 3 ]; then
-  exit 1
-elif [ "$rc" -ne 0 ]; then
-  echo "pre-push: lane check failed (exit $rc), pushing anyway. Tell veed2005." >&2
-fi
+# Blocks direct pushes to main: push your branch and open a PR instead.
+# Set ALLOW_MAIN_PUSH=1 to override.
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ] && [ -z "$ALLOW_MAIN_PUSH" ]; then
+    printf '\n✋ Don'"'"'t push straight to main. Push your branch and open a PR:\n   git push -u origin HEAD && gh pr create --fill\n\n' >&2
+    exit 1
+  fi
+done
 exit 0

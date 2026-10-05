@@ -1,6 +1,6 @@
 """Activity log, metrics events, transcript, and live dashboard broadcast.
 
-Every lane calls these. They never raise into the caller: logging must not break a
+Every part of the app calls these. They never raise into the caller: logging must not break a
 conversation.
 
 Dashboard event types (payload is a dict, always includes "type"):

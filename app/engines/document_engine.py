@@ -1,4 +1,4 @@
-"""Explain a photographed letter or document. Owner: Lane C.
+"""Explain a photographed letter or document.
 
 The model reads the photos and proposes a DocumentExplanation; this module prepares the images
 and then checks the proposal: related_form_id must be a real form, Social Security numbers are

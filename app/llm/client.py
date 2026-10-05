@@ -1,4 +1,4 @@
-"""Thin wrapper over the Anthropic SDK. Shared by every lane.
+"""Thin wrapper over the Anthropic SDK. Shared by the whole app.
 
 Call these through the module (`from app.llm import client as llm; llm.structured(...)`)
 so tests can monkeypatch `llm.structured` / `llm.text` without an API key.

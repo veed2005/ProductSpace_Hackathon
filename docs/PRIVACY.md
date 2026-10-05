@@ -23,7 +23,7 @@ Everything lives in one SQLite file and a data folder (`data/`, never committed 
 | Metrics events (durations, counts) | Measure whether Formline is working | `event` |
 | Reminders | Text the person before a deadline, with their permission | `reminder` |
 
-**Sensitive values.** Only the last 4 digits of an SSN are ever collected, and the person can skip it ("to be provided to caseworker"). Fields marked `sensitive` are masked on the dashboard (`••••`) and must never appear in texts. Receipts mask them (Lane A, Phase A3).
+**Sensitive values.** Only the last 4 digits of an SSN are ever collected, and the person can skip it ("to be provided to caseworker"). Fields marked `sensitive` are masked on the dashboard (`••••`) and must never appear in texts. Receipts mask them.
 
 **Freshness.** Details expire on a schedule so Formline re-checks instead of reusing stale data: income and job after 30 days, household after 90, address after 180, birthday never (`CANONICAL_KEYS` in `app/memory/profile.py`).
 
@@ -34,10 +34,10 @@ Caller ID can be faked, so **knowing someone's phone number is not enough to hea
 - **Built:** a 4-digit PIN is set on first contact and is required before Formline reads back stored details or reuses them on a form. It's stored as a salted PBKDF2-SHA256 hash (100,000 iterations), never in plain text. A correct PIN counts for 30 minutes in that conversation.
 - **Built:** shared phones. A phone can hold several profiles, and Formline asks who's calling. A PIN unlocks only that person's profile.
 - **Built:** only a partner can reset a PIN, from the dashboard (Demo → Reset PIN). There's no self-service reset, which would hand control to whoever holds the phone.
-- **Planned (Lane B, Phase B3):** lock the PIN after 3 wrong attempts.
+- **Built:** after 3 wrong PINs in a row the profile locks until a partner resets it.
 
 **Limits, stated plainly.**
-- A 4-digit PIN has 10,000 combinations. Without the planned lockout, someone with the phone could eventually guess it. With lockout and a partner-only reset, guessing becomes impractical.
+- A 4-digit PIN has 10,000 combinations. Without a lockout, someone with the phone could eventually guess it. With the lockout and a partner-only reset, guessing becomes impractical.
 - Anyone holding the person's unlocked phone during those 30 minutes can continue the conversation.
 - A family member who knows the PIN can see everything in that profile. On shared phones, separate profiles and PINs are the protection.
 - The PIN protects reading and reusing data. It does not encrypt the data.
@@ -58,7 +58,7 @@ The person can say "forget me" or "delete my info" at any time. Formline confirm
 | **Anthropic (Claude API)** | Conversation turns, letter photos, and the text of form PDFs being added to the library | Covered by Anthropic's commercial API terms. Production should confirm the retention terms fit (for example, a zero-data-retention arrangement) and sign a BAA before handling Medicaid health information. |
 | **ngrok** (development and demo only) | Proxies Twilio's webhooks to the laptop | Not part of a real deployment. |
 
-**Letters are data, never instructions.** Text inside a photographed letter can't change what Formline does. A letter that says "ignore previous instructions" is explained like any other letter (Lane C, Phase C3, with a test).
+**Letters are data, never instructions.** Text inside a photographed letter can't change what Formline does. A letter that says "ignore previous instructions" is explained like any other letter (with a test).
 
 ## The partner dashboard
 
@@ -71,7 +71,6 @@ The person can say "forget me" or "delete my info" at any time. Formline confirm
 - **No encryption at rest.** The SQLite file, filled PDFs, and photos sit unencrypted in `data/`.
 - **No retention limit.** Nothing is deleted automatically; data stays until "forget me" or a demo reset.
 - **Logs contain personal data.** Server access logs include phone numbers in dashboard URLs. In offline mode (no Twilio credentials), outgoing texts are written to the log.
-- **Webhook signature validation** is configured on by default, but its check is still being built (Lane B, Phase B2). Until then, requests to `/twilio/messaging` aren't authenticated.
 - **Transcript masking is best-effort.** A PIN typed inside a sentence ("my pin is 1234") isn't hidden. Exact masking needs the brain to flag sensitive messages when it logs them.
 
 ## What production would need

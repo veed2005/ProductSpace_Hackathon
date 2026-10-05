@@ -1,4 +1,4 @@
-"""Talk to handle_turn from the terminal, no Twilio needed. Owner: Lane A.
+"""Talk to handle_turn from the terminal, no Twilio needed.
 
 With --image or /image, paths are sent as-is, so with --server they must exist on the server's machine.
 

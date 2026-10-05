@@ -1,4 +1,4 @@
-"""Create the fake demo personas. Owner: Lane D. Safe to run repeatedly.
+"""Create the fake demo personas. Safe to run repeatedly.
 
   uv run python scripts/seed_demo.py
   uv run python scripts/seed_demo.py --returning-phone +1217XXXXXXX   # map Maria to a real demo phone

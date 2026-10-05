@@ -127,7 +127,7 @@ def test_prompt_describes_fields_with_printed_labels(form_pdf, fake_llm):
     assert "F1 | text | p1 | Full name: | max 40 chars" in text
     assert "F3 | radio | p1 | Are you working now? | states: 1='Yes', 0='No'" in text
     assert "TextField1[0]" not in text  # long PDF names stay out of the prompt
-    assert "- employment: The person's job" in text  # canonical keys from Lane D
+    assert "- employment: The person's job" in text  # canonical keys from memory
     assert fake_llm.calls[0]["model"] == llm.strong_model()
 
 

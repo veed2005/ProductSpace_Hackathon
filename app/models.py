@@ -175,7 +175,7 @@ class Receipt(SQLModel, table=True):
 
 
 class PinGuard(SQLModel, table=True):
-    """Wrong-PIN attempts per profile (Lane B). A separate table, so existing databases pick it up
+    """Wrong-PIN attempts per profile. A separate table, so existing databases pick it up
     without a reset. No foreign key on purpose: it holds only counts, and profile deletion
     (forget me, demo reset) never has to know about it."""
 

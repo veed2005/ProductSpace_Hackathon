@@ -196,7 +196,7 @@ def test_speech_seconds_scales_and_caps():
     assert voice.speech_seconds(" ".join(["word"] * 1000)) == 15.0
 
 
-# ---------------------------------------------------------------- demo hardening (B6)
+# ---------------------------------------------------------------- demo hardening
 
 def test_slow_brain_says_one_moment_first(client, monkeypatch):
     import time as _time

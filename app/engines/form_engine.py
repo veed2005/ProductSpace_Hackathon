@@ -1,4 +1,4 @@
-"""Generic form conversation engine. Owner: Lane A."""
+"""Generic form conversation engine."""
 
 from __future__ import annotations
 

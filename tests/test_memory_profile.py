@@ -29,7 +29,7 @@ def test_invalid_paths(path):
 
 
 def test_every_form_schema_uses_canonical_profile_keys():
-    """Lane C's schemas must map to keys memory understands."""
+    """Form schemas must map to keys memory understands."""
     for meta in form_library.list_forms():
         for field in form_library.load_schema(meta.form_id).fields:
             if field.profile_key:

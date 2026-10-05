@@ -1,6 +1,6 @@
-"""Turn an official PDF into a draft form schema. Owner: Lane C.
+"""Turn an official PDF into a draft form schema.
 
-Called by scripts/ingest_form.py (CLI) and by the dashboard's "Add a new form" upload (Lane D).
+Called by scripts/ingest_form.py (CLI) and by the dashboard's "Add a new form" upload.
 
 The model picks the questions and writes them; code supplies everything it can determine from
 the PDF (field names, Yes/No states, max lengths), checks the draft, asks once for a fix, and

@@ -12,7 +12,7 @@ A live web dashboard shows forms filling in, documents being explained, and memo
 
 > Prototype for a hackathon. Uses fake personas only. Nothing is submitted to any government system; completed forms end as verified, downloadable PDFs.
 
-**Team:** read [docs/TEAM.md](docs/TEAM.md) first (lanes, file ownership, git workflow). The full spec is in [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md).
+**Team:** read [docs/TEAM.md](docs/TEAM.md) first (shared files, module APIs, git workflow). The full spec is in [docs/PROJECT_BRIEF.md](docs/PROJECT_BRIEF.md).
 
 ## Quick start
 
@@ -21,11 +21,11 @@ Requires [uv](https://docs.astral.sh/uv/) (it installs the right Python for you)
 ```bash
 git clone https://github.com/veed2005/ProductSpace_Hackathon.git
 cd ProductSpace_Hackathon
-sh scripts/setup.sh                       # installs deps, enables git hooks, creates .env, runs tests, shows your lane
+sh scripts/setup.sh                       # installs deps, enables git hooks, creates .env, runs tests
 uv run uvicorn app.main:app --reload      # always run commands from the repo folder
 ```
 
-Then open Claude Code in this folder and tell it what to work on (every phase in the lane plans is merged; see [Build status](#build-status)). Setting up on a new computer: [Moving to another computer](docs/CALL_THE_INTERNET.md#moving-to-another-computer) lists what git doesn't carry (`.env`, `data/`, ngrok's token, the extension).
+Then open Claude Code in this folder and tell it what to work on (see [Build status](#build-status)). Setting up on a new computer: [Moving to another computer](docs/CALL_THE_INTERNET.md#moving-to-another-computer) lists what git doesn't carry (`.env`, `data/`, ngrok's token, the extension).
 
 Chat with Formline in the terminal (no Twilio needed):
 
@@ -85,6 +85,6 @@ docs/          CALL_THE_INTERNET.md, TRADEOFFS.md, PRIVACY.md, DEMO_SCRIPT.md
 
 ## Build status
 
-- All lane plans are merged: Lane A (#22, #23), B1–B6, C1–C6 and D1–D6.
+- The original build plan is fully merged (through #23).
 - The "call the internet" pivot (Chrome extension + browser agent) landed in #24.
-- Open: outgoing calls and texts wait on [Twilio account settings](docs/CALL_THE_INTERNET.md#twilio-account-settings), and the browser-agent code (`app/agent/`, `app/browser/`, `extension/`, `demo_sites/`) has no lane owner yet.
+- Open: outgoing calls and texts wait on [Twilio account settings](docs/CALL_THE_INTERNET.md#twilio-account-settings).

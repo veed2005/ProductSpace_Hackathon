@@ -34,7 +34,7 @@ def test_preflight_env_checks_flag_unsafe_demo_settings(monkeypatch):
 
 def test_preflight_reports_missing_demo_forms():
     checks = {c.name: c for c in demo_preflight.check_forms()}
-    # The repo only has the placeholder form until Lane C adds the real ones.
+    # The repo only has the placeholder form until the real ones are added.
     assert "SNAP application form in the library" in checks
     assert all(c.fix for c in checks.values() if not c.ok)
 

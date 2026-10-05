@@ -1,4 +1,4 @@
-"""Re-read a filled PDF and check it against what we meant to write. Owner: Lane C."""
+"""Re-read a filled PDF and check it against what we meant to write."""
 
 from collections.abc import Iterable
 from dataclasses import replace

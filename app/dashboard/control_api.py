@@ -1,4 +1,4 @@
-"""Metrics and demo controls. Owner: Lane D.
+"""Metrics and demo controls.
 
 GET  /api/metrics
 GET  /api/demo/state                       personas' phones/PINs, pending reminders, profiles

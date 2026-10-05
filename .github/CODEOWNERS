@@ -1,55 +1,9 @@
-# Lane owners get auto-requested as reviewers when a PR touches their files.
-# Keep in sync with scripts/lane.py.
+# Reviewers auto-requested on PRs.
 
-# Shared files: everyone is notified
+# Default
 *                                   @veed2005
 
-# Lane A: Conversation brain
-/app/core/turn.py                   @aryavsaigal
-/app/core/router.py                 @aryavsaigal
-/app/core/style.py                  @aryavsaigal
-/app/core/referrals*                @aryavsaigal
-/app/engines/form_engine.py         @aryavsaigal
-/app/llm/prompts/conversation*      @aryavsaigal
-/scripts/simulate.py                @aryavsaigal
-/tests/test_brain_*                 @aryavsaigal
-
-# Lane B: Channels + identity
-/app/channels/                      @Edoubek1024
-/app/core/identity.py               @Edoubek1024
-/app/reminders.py                   @Edoubek1024
-/tests/test_channels_*              @Edoubek1024
-/tests/test_identity_*              @Edoubek1024
-/tests/test_reminders_*             @Edoubek1024
-
-# Lane C: Forms, PDFs, documents
-/app/engines/form_library.py        @luisNava111
-/app/engines/document_engine.py     @luisNava111
-/app/engines/ingest.py              @luisNava111
-/app/pdf/                           @luisNava111
-/forms/                             @luisNava111
-/scripts/ingest_form.py             @luisNava111
-/scripts/inspect_pdf.py             @luisNava111
-/scripts/make_sample_form.py        @luisNava111
-/app/llm/prompts/document*          @luisNava111
-/app/llm/prompts/ingest*            @luisNava111
-/tests/test_forms_*                 @luisNava111
-/tests/test_docs_*                  @luisNava111
-/tests/test_pdf_*                   @luisNava111
-
-# Lane D: Memory, dashboard, metrics, demo
-/app/memory/                        @veed2005
-/app/engines/status_engine.py       @veed2005
-/app/dashboard/                     @veed2005
-/app/metrics.py                     @veed2005
-/scripts/seed_demo.py               @veed2005
-/scripts/reset_demo.py              @veed2005
-/scripts/make_demo_letter.py        @veed2005
-/scripts/demo_preflight.py          @veed2005
-/docs/PRIVACY.md                    @veed2005
-/docs/DEMO_SCRIPT.md                @veed2005
-
-# Shared contracts: all lane owners
+# Shared contracts: the whole team
 /app/contracts.py                   @veed2005 @aryavsaigal @Edoubek1024 @luisNava111
 /app/models.py                      @veed2005 @aryavsaigal @Edoubek1024 @luisNava111
 /app/events.py                      @veed2005 @aryavsaigal @Edoubek1024 @luisNava111

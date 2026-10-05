@@ -1,4 +1,4 @@
-"""Print-ready fake Medicaid renewal letter for demo step 3. Owner: Lane D.
+"""Print-ready fake Medicaid renewal letter for demo step 3.
 
   uv run python scripts/make_demo_letter.py                    # deadline 30 days from today
   uv run python scripts/make_demo_letter.py --deadline 2026-11-01

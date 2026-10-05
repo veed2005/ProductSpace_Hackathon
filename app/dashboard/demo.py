@@ -1,6 +1,6 @@
-"""Demo personas, seeding, and reset. Owner: Lane D.
+"""Demo personas, seeding, and reset.
 
-Used by scripts/seed_demo.py, scripts/reset_demo.py, and (Phase D5) the dashboard's demo controls.
+Used by scripts/seed_demo.py, scripts/reset_demo.py, and the dashboard's demo controls.
 All personas are fake. Phone numbers default to the 555-01xx range reserved for fiction; pass real
 team phones for the live demo.
 """

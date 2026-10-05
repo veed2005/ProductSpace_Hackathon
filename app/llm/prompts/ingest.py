@@ -1,4 +1,4 @@
-"""Prompt for drafting a form schema from an official PDF. Owner: Lane C (used by engines/ingest.py)."""
+"""Prompt for drafting a form schema from an official PDF. Used by engines/ingest.py."""
 
 SYSTEM = """\
 You turn an official fillable PDF form into a question flow for Formline, a phone assistant \

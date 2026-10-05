@@ -1,4 +1,4 @@
-"""'What have you done for me?' Owner: Lane D."""
+"""'What have you done for me?'"""
 
 from sqlmodel import select
 

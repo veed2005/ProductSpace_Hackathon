@@ -1,4 +1,4 @@
-"""FastAPI app. Every lane's router is registered here once, so nobody needs to edit this file."""
+"""FastAPI app. Every router is registered here once."""
 
 import logging
 from contextlib import asynccontextmanager

@@ -1,4 +1,4 @@
-"""Prompt for explaining a photographed letter. Owner: Lane C (used by engines/document_engine.py)."""
+"""Prompt for explaining a photographed letter. Used by engines/document_engine.py."""
 
 from datetime import date
 
